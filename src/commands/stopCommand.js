@@ -1,6 +1,10 @@
-import { stateManager } from "../brain/stateManager.js";
+export default function stopCommand(bot, stateManager, logger) {
+  logger?.(`[stop] Parando movimento do bot ${bot.username}`)
+  bot.chat("Ok, vou parar.")
 
-export default function stopCommand(bot) {
-  bot.chat("Parando.");
-  stateManager.setState("idle", bot);
+  if (bot.pathfinder) {
+    bot.pathfinder.setGoal(null)
+  }
+
+  stateManager.setState("idle", bot)
 }

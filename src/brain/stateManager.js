@@ -1,18 +1,26 @@
-export const stateManager = {
-  states: {},
-  active: null,
+export function createStateManager(logger) {
+  const states = {}
+  let active = null
+  return {
+    register(name, module) {
+      states[name] = module
+      logger?.(`[state] Registrado estado: ${name}`)
+    },
 
-  register(name, module) {
-    this.states[name] = module;
-  },
+    setState(name, bot, data = {}) {
+      const next = states[name]
+      if (!next) {
+        logger?.(`[state] Estado não encontrado: ${name}`)
+        return
+      }
 
-  setState(name, bot, data = {}) {
-    if (this.active?.exit) this.active.exit(bot);
-    this.active = this.states[name];
-    if (this.active?.enter) this.active.enter(bot, data);
-  },
+      if (active?.exit) active.exit(bot)
+      active = next
+      if (active?.enter) active.enter(bot, data)
+    },
 
-  update(bot) {
-    if (this.active?.update) this.active.update(bot);
+    update(bot) {
+      if (active?.update) active.update(bot)
+    },
   }
-};
+}
