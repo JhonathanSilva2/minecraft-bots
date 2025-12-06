@@ -14,7 +14,9 @@ function createLogger(botName) {
   return (...messages) => console.log(`[${botName}]`, ...messages)
 }
 
-export function startBot(name = "Max") {
+export function startBot(name = "Max", options = {}) {
+  const { defaultProfessions = [] } = options
+
   const bot = mineflayer.createBot({
     host: "localhost",
     port: 25565,
@@ -51,6 +53,15 @@ export function startBot(name = "Max") {
     createSmartMovement(bot, logger)
     bot.brain.initialize(bot)
     attachEventHandlers(bot, logger)
+
+    if (defaultProfessions.length) {
+      for (const professionName of defaultProfessions) {
+        const ok = bot.professions.enable(professionName)
+        if (!ok) {
+          logger(`[startup] profissao '${professionName}' nao encontrada`)
+        }
+      }
+    }
   })
 
   return bot

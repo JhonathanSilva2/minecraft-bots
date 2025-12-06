@@ -1,6 +1,7 @@
 import pf from "mineflayer-pathfinder"
 const { Movements, goals } = pf
 const { GoalNear } = goals
+import { craftingBasic } from "../crafting/craftingBasic.js"
 
 import { craftingManager } from "../crafting/craftingManager.js"
 
@@ -55,17 +56,38 @@ export function createWoodcutter(bot, logger) {
 
   async function runCycle() {
     try {
-      // 1) Garantir machado
-      // const hasAxe = await craftingManager.ensureTool(bot, "axe", logger)
+      // 1) Detectar machado
+      let hasAxe = bot.inventory.items().some((i) => i.name.includes("axe"))
+      // console.log(bot.inventory.items()) inventario
+      if (!hasAxe) {
+        logger?.("[lenhador] sem machado — craftando wooden_axe...")
 
-      // if (!hasAxe) {
-      //   logger?.("[lenhador] sem machado — tentando craft novamente...")
-      //   return
-      // }
+        // tenta craftar
+        const crafted = await craftingBasic.craft(bot, "wooden_axe", logger)
+
+        if (!crafted) {
+          logger?.("[lenhador] falta material → vou cortar árvore")
+
+          // vá cortar árvore
+          const tree = findNearestTree()
+          if (!tree) {
+            logger?.("[lenhador] nenhuma árvore perto!")
+            return
+          }
+
+          const basePos = findTrunkBase(tree.position)
+          await moveTo(basePos)
+          await cutTrunk(basePos)
+
+          return // encerra ciclo → físicaTick chamará de novo
+        }
+
+        hasAxe = true
+      }
 
       if (!enabled) return
 
-      // 2) Se tem pack de madeira, armazenar (placeholder)
+      // 2) Se tem pack
       const woodCount = countLogs(bot)
       if (woodCount >= 64) {
         logger?.("[lenhador] pack detectado — armazenando...")
@@ -73,7 +95,7 @@ export function createWoodcutter(bot, logger) {
         return
       }
 
-      // 3) Achar árvore
+      // 3) Procurar árvore
       const tree = findNearestTree()
       if (!tree || !enabled) return
 

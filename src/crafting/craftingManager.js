@@ -3,6 +3,7 @@ import { getLocation, setLocation } from "../storage/locationManager.js"
 import pf from "mineflayer-pathfinder"
 const { Movements, goals } = pf
 const { GoalNear } = goals
+import { craftingBasic } from "./craftingBasic.js"
 
 export const craftingManager = {
   // ======================================================
@@ -28,7 +29,7 @@ export const craftingManager = {
   // GARANTE UMA CRAFTING TABLE NA BASE
   // ======================================================
   async ensureWorkbench(bot, logger) {
-    const base = await getLocation("base")
+    const base = await getLocation("workbench")
     if (!base) {
       logger?.("[craft] base não definida!")
       return null
@@ -98,38 +99,9 @@ export const craftingManager = {
   // ======================================================
   // SISTEMA DE CRAFT UNIVERSAL
   // ======================================================
+
   async craftItem(bot, itemName, qty, logger) {
-    try {
-      const mcData = bot.mcData
-      const itemID = mcData.itemsByName[itemName]?.id
-      console.log("Crafting item:", itemName, "ID:", itemID)
-      if (!itemID) {
-        logger?.(`[craft] item inválido: ${itemName}`)
-        return false
-      }
-
-      const recipes = bot.recipesFor(itemID, null, 1)
-      if (!recipes || recipes.length === 0) {
-        logger?.(`[craft] receita de ${itemName} não encontrada!`)
-        return false
-      }
-
-      const recipe = recipes[0]
-      let table = null
-
-      if (recipe.requiresTable) {
-        const work = await getLocation("workbench")
-        if (!work) return false
-        table = bot.blockAt(new Vec3(work.x, work.y, work.z))
-      }
-
-      await bot.craft(recipe, qty, table)
-      logger?.(`[craft] craftado ${qty}x ${itemName}`)
-      return true
-    } catch (err) {
-      logger?.(`[craft] erro ao craftar ${itemName}: ${err.message}`)
-      return false
-    }
+    return await craftingBasic.craft(bot, itemName, logger)
   },
 
   // ======================================================

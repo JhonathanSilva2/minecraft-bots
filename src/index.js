@@ -1,14 +1,17 @@
 import { startBot } from "./core/bot.js"
-import { getBotNames } from "./utils/getBotName.js"
+import { getBotConfigs } from "./utils/getBotName.js"
 
-const botNames = getBotNames()
+const botConfigs = getBotConfigs()
 
-console.log("Iniciando bots:", botNames.join(", "))
+console.log(
+  "Iniciando bots:",
+  botConfigs.map((cfg) => cfg.name).join(", ")
+)
 
 async function startBotsSequentially() {
-  for (const name of botNames) {
-    console.log(`Iniciando bot ${name}...`)
-    startBot(name)
+  for (const cfg of botConfigs) {
+    console.log(`Iniciando bot ${cfg.name}...`)
+    startBot(cfg.name, { defaultProfessions: cfg.professions })
 
     // Aguarda 1 segundo para evitar ECONNRESET
     await new Promise((resolve) => setTimeout(resolve, 1000))

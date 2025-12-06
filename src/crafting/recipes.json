@@ -1,0 +1,74 @@
+{
+  "oak_planks": {
+    "requiresTable": false,
+    "shape": [["oak_log"]],
+    "outputs": { "oak_planks": 4 }
+  },
+
+  "spruce_planks": {
+    "requiresTable": false,
+    "shape": [["spruce_log"]],
+    "outputs": { "spruce_planks": 4 }
+  },
+
+  "birch_planks": {
+    "requiresTable": false,
+    "shape": [["birch_log"]],
+    "outputs": { "birch_planks": 4 }
+  },
+
+  "jungle_planks": {
+    "requiresTable": false,
+    "shape": [["jungle_log"]],
+    "outputs": { "jungle_planks": 4 }
+  },
+
+  "acacia_planks": {
+    "requiresTable": false,
+    "shape": [["acacia_log"]],
+    "outputs": { "acacia_planks": 4 }
+  },
+
+  "dark_oak_planks": {
+    "requiresTable": false,
+    "shape": [["dark_oak_log"]],
+    "outputs": { "dark_oak_planks": 4 }
+  },
+
+  "mangrove_planks": {
+    "requiresTable": false,
+    "shape": [["mangrove_log"]],
+    "outputs": { "mangrove_planks": 4 }
+  },
+
+  "cherry_planks": {
+    "requiresTable": false,
+    "shape": [["cherry_log"]],
+    "outputs": { "cherry_planks": 4 }
+  },
+
+  "stick": {
+    "requiresTable": false,
+    "shape": [["oak_planks"], ["oak_planks"]],
+    "outputs": { "stick": 4 }
+  },
+
+  "crafting_table": {
+    "requiresTable": false,
+    "shape": [
+      ["oak_planks", "oak_planks"],
+      ["oak_planks", "oak_planks"]
+    ],
+    "outputs": { "crafting_table": 1 }
+  },
+
+  "wooden_axe": {
+    "requiresTable": true,
+    "shape": [
+      ["planks", "planks"],
+      ["planks", "stick"],
+      [null, "stick"]
+    ],
+    "outputs": { "wooden_axe": 1 }
+  }
+}
