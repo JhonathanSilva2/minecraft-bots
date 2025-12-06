@@ -34,6 +34,7 @@ export function startBot(name = "Max", options = {}) {
 
   bot.movement = new MovementManager(bot)
   bot.locations = new LocationManager(bot, logger)
+  
 
   // Registrar módulos no bot (injeção de dependências)
   bot.brain = createBrain(logger)

@@ -10,7 +10,8 @@ const KNOWN_COMMANDS = new Set([
   "profissão",
   "status",
   "local",
-  "armazem", // novo
+  "armazem",
+  "craftar"
 ])
 
 export function createCommandHandler(stateManager, logger) {
@@ -77,6 +78,11 @@ export function createCommandHandler(stateManager, logger) {
       handleGoto()
     }
 
+    if (command === "craftar") {
+      handleCraft()
+      return
+    }
+
     function handleFollow() {
       if ((args[0] || "").toLowerCase() === "me") {
         logger?.(`[command] ${bot.username} -> seguir ${username}`)
@@ -116,6 +122,21 @@ export function createCommandHandler(stateManager, logger) {
       if (args.includes(bot.username)) {
         stopCommand(bot, stateManager, logger)
       }
+    }
+
+    function handleCraft()
+    {
+          const item = args[0]
+          const amount = args[1] ? parseInt(args[1]) : 1
+          
+          const crafter = bot.professions.get("crafter")
+
+          // Verifica se existe E se está habilitado
+          if (crafter && crafter.isEnabled()) {
+            crafter.processOrder(item, amount)
+          } else {
+            bot.chat("A profissão de Crafter não está ativa.")
+          }
     }
 
     function handleProfession() {

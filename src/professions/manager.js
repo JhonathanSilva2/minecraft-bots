@@ -30,5 +30,9 @@ export function createProfessionManager(bot, logger) {
     return Object.keys(active).filter((name) => active[name].isEnabled())
   }
 
-  return { enable, disable, list }
+  function get(name) {
+    return active[name]
+  }
+
+  return { enable, disable, list, get }
 }
