@@ -5,10 +5,7 @@ import "dotenv/config"
 
 const botConfigs = getBotConfigs()
 
-console.log(
-  "Iniciando bots:",
-  botConfigs.map((cfg) => cfg.name).join(", ")
-)
+console.log("Iniciando bots:", botConfigs.map((cfg) => cfg.name).join(", "))
 
 async function startBotsSequentially() {
   for (const cfg of botConfigs) {

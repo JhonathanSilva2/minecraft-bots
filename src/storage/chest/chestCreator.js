@@ -1,6 +1,5 @@
 import { Vec3 } from "vec3"
 import pf from "mineflayer-pathfinder"
-import { getLocation } from "../locationManager.js"
 import { getChest, setChest, loadChests } from "./chestManager.js"
 
 const { goals } = pf
@@ -15,7 +14,7 @@ export async function ensureChestForItem(bot, itemName, logger) {
   const existing = await getChest(itemName)
   if (existing) return existing
 
-  const armazem = await getLocation("armazem")
+  const armazem = await bot.locations.get("armazem")
   if (!armazem) {
     logger?.("[armazem] Nenhuma área de armazém definida.")
     return null
@@ -81,9 +80,7 @@ export async function ensureChestForItem(bot, itemName, logger) {
         const coords = { x, y, z }
         await setChest(itemName, coords)
 
-        logger?.(
-          `[armazem] baú criado para ${itemName} em (${x}, ${y}, ${z})`
-        )
+        logger?.(`[armazem] baú criado para ${itemName} em (${x}, ${y}, ${z})`)
 
         return coords
       } catch (err) {

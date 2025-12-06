@@ -1,5 +1,4 @@
 import { Vec3 } from "vec3"
-import { getLocation, setLocation } from "../storage/locationManager.js"
 import pf from "mineflayer-pathfinder"
 const { Movements, goals } = pf
 const { GoalNear } = goals
@@ -29,7 +28,7 @@ export const craftingManager = {
   // GARANTE UMA CRAFTING TABLE NA BASE
   // ======================================================
   async ensureWorkbench(bot, logger) {
-    const base = await getLocation("workbench")
+    const base = await bot.locations.get("workbench")
     if (!base) {
       logger?.("[craft] base não definida!")
       return null
@@ -45,7 +44,7 @@ export const craftingManager = {
     // Já existe crafting table?
     const block = bot.blockAt(pos)
     if (block && block.name === "crafting_table") {
-      await setLocation("workbench", { x, y, z })
+      await bot.locations.set("workbench", { x, y, z })
       return { x, y, z }
     }
 
@@ -57,7 +56,7 @@ export const craftingManager = {
     const placed = await this.placeBlock(bot, "crafting_table", pos, logger)
     if (!placed) return null
 
-    await setLocation("workbench", { x, y, z })
+    await bot.locations.set("workbench", { x, y, z })
     return { x, y, z }
   },
 
@@ -65,7 +64,7 @@ export const craftingManager = {
   // IR PARA BASE
   // ======================================================
   async moveToBase(bot, logger) {
-    const base = await getLocation("base")
+    const base = await bot.locations.get("base")
     if (!base) return
 
     const x = base.x + Math.floor(base.width / 2)

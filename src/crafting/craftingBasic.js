@@ -1,5 +1,4 @@
 import { Vec3 } from "vec3"
-import { getLocation } from "../storage/locationManager.js"
 import { loadRecipes } from "./receipesLoader.js"
 import pf from "mineflayer-pathfinder"
 const { GoalNear } = pf.goals
@@ -169,7 +168,7 @@ export const craftingBasic = {
   // ABRIR MESA
   // ======================================================
   async _openWorkbench(bot, logger) {
-    const work = await getLocation("workbench")
+    const work = await bot.locations.get("workbench")
 
     if (!work) {
       logger?.("[craft-basic] workbench não registrada")

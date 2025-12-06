@@ -3,13 +3,13 @@ import pf from "mineflayer-pathfinder"
 const { pathfinder } = pf
 import mcDataLoader from "minecraft-data"
 
-
 import { attachEventHandlers } from "./events.js"
 import { createBrain } from "../brain/brain.js"
 import { createCommandHandler } from "../commands/commandHandler.js"
 import { createProfessionManager } from "../professions/manager.js"
-import { createSmartMovement } from "../modules/smartMovement/index.js"
 import { writeFileSync } from "fs"
+import MovementManager from "../modules/movement/MovementManager.js"
+import LocationManager from "../modules/location/LocationManager.js"
 
 import "dotenv/config"
 
@@ -29,7 +29,11 @@ export function startBot(name = "Max", options = {}) {
     version: "1.20.6",
   })
 
+  // Inicializar módulos personalizados
   const logger = createLogger(name)
+
+  bot.movement = new MovementManager(bot)
+  bot.locations = new LocationManager(bot, logger)
 
   // Registrar módulos no bot (injeção de dependências)
   bot.brain = createBrain(logger)
@@ -55,7 +59,8 @@ export function startBot(name = "Max", options = {}) {
       `mcdata-items-${bot.version}.json`,
       JSON.stringify(bot.mcData.itemsByName, null, 2)
     )
-    createSmartMovement(bot, logger)
+    // createSmartMovement(bot, logger)
+
     bot.brain.initialize(bot)
     attachEventHandlers(bot, logger)
 

@@ -1,6 +1,5 @@
 import { Vec3 } from "vec3"
 import pf from "mineflayer-pathfinder"
-import { getLocation } from "../storage/locationManager.js"
 
 const { goals } = pf
 const { GoalBlock } = goals
@@ -11,7 +10,7 @@ const { GoalBlock } = goals
  * Se não existir, tenta colocar uma existente do inventário.
  */
 export async function ensureCraftTable(bot, logger) {
-  const base = await getLocation("base")
+  const base = await bot.locations.get("base")
   if (!base) {
     logger?.("[craft] nenhuma área 'base' definida.")
     return null
@@ -37,7 +36,9 @@ export async function ensureCraftTable(bot, logger) {
   }
 
   // 2) tentar colocar uma crafting_table do inventário
-  const tableItem = bot.inventory.items().find((i) => i.name === "crafting_table")
+  const tableItem = bot.inventory
+    .items()
+    .find((i) => i.name === "crafting_table")
 
   if (!tableItem) {
     logger?.("[craft] bot não possui crafting_table no inventário.")
@@ -53,7 +54,12 @@ export async function ensureCraftTable(bot, logger) {
   const anchor = bot.blockAt(anchorPos)
   const here = bot.blockAt(new Vec3(targetX, targetY, targetZ))
 
-  if (!anchor || anchor.boundingBox !== "block" || !here || here.name !== "air") {
+  if (
+    !anchor ||
+    anchor.boundingBox !== "block" ||
+    !here ||
+    here.name !== "air"
+  ) {
     logger?.(
       "[craft] posição central da base não é adequada para colocar crafting_table."
     )
@@ -76,9 +82,7 @@ export async function ensureCraftTable(bot, logger) {
     )
     return placed
   } catch (err) {
-    logger?.(
-      `[craft] erro ao colocar crafting_table: ${err?.message ?? err}`
-    )
+    logger?.(`[craft] erro ao colocar crafting_table: ${err?.message ?? err}`)
     return null
   }
 }

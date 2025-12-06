@@ -2,7 +2,6 @@ import followCommand from "./followCommand.js"
 import stopCommand from "./stopCommand.js"
 import statusCommand from "./statusCommand.js"
 import localCommand from "./localCommand.js"
-import { gotoLocation } from "../navigation/gotoLocation.js"
 
 const KNOWN_COMMANDS = new Set([
   "seguir",
@@ -123,11 +122,11 @@ export function createCommandHandler(stateManager, logger) {
       const professionName = (args[0] || "").toLowerCase()
       const action = (args[1] || "").toLowerCase()
 
-      const permitted_professions = ["lenhador","estoquista"]
+      const permitted_professions = ["lenhador", "estoquista"]
 
       if (!permitted_professions.includes(professionName)) return
       if (!bot.professions) return
-      
+
       if (action === "on") {
         logger?.(`[command] ativando profissao: ${professionName}`)
         bot.professions.enable(professionName)
@@ -153,7 +152,7 @@ export function createCommandHandler(stateManager, logger) {
     function handleGoto() {
       const [locationName] = args
       if (scope === "all" || rawPrefixName === bot.username || !hasBang) {
-        gotoLocation(bot, locationName, logger)
+        bot.movement.gotoLocation(locationName)
       }
     }
 
