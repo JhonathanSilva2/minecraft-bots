@@ -1,232 +1,381 @@
 import pf from "mineflayer-pathfinder"
+import prismarineItem from 'prismarine-item' // <-- NOVO: Importa o loader da classe Item
 const { goals, Movements } = pf
 
+// ============================================
+// SISTEMA DE DEBUG MODULAR
+// ============================================
+const DEBUG_MODE = true
+
+function debugLog(section, message, data = null) {
+  if (!DEBUG_MODE) return
+  const timestamp = new Date().toISOString().split('T')[1].slice(0, -1)
+  console.log(`[${timestamp}] [DEBUG:${section}] ${message}`)
+  if (data !== null) {
+    console.log(JSON.stringify(data, null, 2))
+  }
+}
+
+function debugRecipe(recipe, itemName) {
+  if (!DEBUG_MODE) return
+  debugLog('RECIPE', `Analisando receita de: ${itemName}`)
+  
+  // Detecção mais robusta para objetos manuais
+  const type = recipe.ingredients ? 'ingredients' : 
+               recipe.inShape ? 'inShape' : 'delta/other'
+               
+  debugLog('RECIPE-TYPE', `Tipo de receita detectado: ${type}`)
+  
+  if (recipe.inShape) {
+    debugLog('RECIPE-INSHAPE', 'Estrutura do inShape:', recipe.inShape)
+  }
+}
+
+function debugRawIds(rawIds) {
+  if (!DEBUG_MODE) return
+  debugLog('RAW-IDS', `Total de IDs coletados (com nulls): ${rawIds.length}`)
+  // ... (Log mantido simples para economizar espaço visual) ...
+}
+
+function debugCandidates(candidates, originalItem) {
+  if (!DEBUG_MODE) return
+  debugLog('CANDIDATES', `Original: ${JSON.stringify(originalItem)} -> Ops: ${candidates.length}`)
+}
+
+// ============================================
+// MAPA DE PRIORIDADES
+// ============================================
+const TOOL_TIERS = {
+  axe: ["diamond_axe", "iron_axe", "stone_axe", "wooden_axe", "golden_axe"],
+  pickaxe: ["diamond_pickaxe", "iron_pickaxe", "stone_pickaxe", "wooden_pickaxe", "golden_pickaxe"],
+  shovel: ["diamond_shovel", "iron_shovel", "stone_shovel", "wooden_shovel", "golden_shovel"],
+  hoe: ["diamond_hoe", "iron_hoe", "stone_hoe", "wooden_hoe", "golden_hoe"],
+  sword: ["diamond_sword", "iron_sword", "stone_sword", "wooden_sword", "golden_sword"],
+}
+
 export function createCrafter(bot, logger) {
-  let enabled = false
-  let isCrafting = false // Equivalente ao 'running' do estoquista, mas para operações pontuais
+  let enabled = false
+  let isCrafting = false
 
-  // --- MÉTODOS PÚBLICOS (Interface) ---
+  // --- CORREÇÃO DE ACESSO A CLASSE ITEM ---
+  // Cria a classe Item uma única vez usando o loader
+  const ItemClass = prismarineItem(bot.version) 
+  // ---------------------------------------
 
-  function setEnabled(value) {
-    enabled = value
-    if (!value) {
-      stopCurrentActions()
-    }
-    bot.chat(value ? "Crafter ativado e aguardando pedidos!" : "Crafter desativado.")
-  }
+  function setEnabled(value) {
+    enabled = value
+    if (!value) stopCurrentActions()
+    bot.chat(value ? "Crafter ativado!" : "Crafter pausado.")
+  }
 
-  function isEnabled() {
-    return enabled
-  }
+  function isEnabled() { return enabled }
 
-  /**
-   * Chamado externamente (pelo CommandHandler) para iniciar um trabalho.
-   */
-  async function processOrder(itemName, amount = 1) {
-    if (!enabled) {
-      bot.chat("Minha profissão de Crafter está desativada.")
-      return
-    }
+  async function processOrder(itemName, amount = 1) {
+    if (!enabled) return bot.chat("Crafter desligado.")
+    if (isCrafting) return bot.chat("Ocupado.")
+    if (!bot.mcData) return bot.chat("Carregando dados...")
 
-    if (isCrafting) {
-      bot.chat("Estou ocupado com outro pedido agora.")
-      return
-    }
+    isCrafting = true
+    let cleanName = itemName.toLowerCase().replace("minecraft:", "").replace(" ", "_")
+    logger(`[crafter] Pedido inicial: ${amount}x ${cleanName}`)
 
-    // Validação básica
-    if (!bot.mcData) {
-      bot.chat("Ainda estou carregando meus dados...")
-      return
-    }
+    try {
+      if (TOOL_TIERS[cleanName]) {
+        bot.chat(`Você pediu '${cleanName}'. Vou tentar fazer o melhor possível...`)
+        const tierList = TOOL_TIERS[cleanName]
+        let craftedSomething = false
 
-    isCrafting = true
-    logger(`[crafter] Iniciando pedido: ${amount}x ${itemName}`)
+        for (const tierItem of tierList) {
+          logger(`[crafter] Tentando tier: ${tierItem}`)
+          const success = await attemptCraftSequence(tierItem, amount, true)
+          if (success) {
+            bot.chat(`Sucesso! Fiz ${amount}x ${tierItem}.`)
+            craftedSomething = true
+            break
+          }
+        }
+        if (!craftedSomething) bot.chat(`Não consegui fazer nenhum tipo de ${cleanName}.`)
+      } else {
+        await attemptCraftSequence(cleanName, amount, false)
+      }
+    } catch (err) {
+      logger(`[crafter] Erro: ${err.message}`)
+      bot.chat("Erro crítico. Veja console.")
+      console.error(err)
+    } finally {
+      isCrafting = false
+      if (bot.currentWindow) bot.currentWindow.close()
+    }
+  }
 
-    try {
-      // 1. Identificar Item e Receita
-      const itemData = bot.registry.itemsByName[itemName]
-      if (!itemData) {
-        bot.chat(`Não conheço o item '${itemName}'.`)
-        return
-      }
+  async function attemptCraftSequence(targetItemName, amount, isTierAttempt) {
+      const itemData = bot.registry.itemsByName[targetItemName]
+      
+      if (!itemData) {
+        if (!isTierAttempt) bot.chat(`Item desconhecido: ${targetItemName}`)
+        return false
+      }
 
-      const recipes = bot.recipesFor(itemData.id, null, 1, null)
-      if (recipes.length === 0) {
-        bot.chat(`Não encontrei receita para ${itemName}.`)
-        return
-      }
+      // 1. Pegamos os dados RAW do mcData
+      const rawRecipes = bot.mcData.recipes[itemData.id]
+      
+      if (!rawRecipes || rawRecipes.length === 0) {
+        if (!isTierAttempt) bot.chat(`Sem receita para ${targetItemName}.`)
+        return false
+      }
 
-      const recipe = recipes[0]
-      bot.chat(`Receita encontrada para ${itemName}. Calculando materiais...`)
+      for (const rawRecipe of rawRecipes) {
+        try {
+            // Usamos a receita RAW para calcular requisitos
+            const requirements = calculateRequirements(rawRecipe, amount, targetItemName)
+            
+            if (!requirements || requirements.length === 0) continue
 
-      // 2. Calcular Ingredientes
-      const ingredientsNeeded = {}
-      
-      if (recipe.ingredients) {
-        recipe.ingredients.forEach((id) => {
-          const itemId = Array.isArray(id) ? id[0] : id
-          ingredientsNeeded[itemId] = (ingredientsNeeded[itemId] || 0) + (1 * amount)
-        })
-      } else if (recipe.delta) {
-        recipe.delta.forEach((stack) => {
-          if (stack.count < 0) {
-            ingredientsNeeded[stack.id] = (ingredientsNeeded[stack.id] || 0) + (Math.abs(stack.count) * amount)
-          }
-        })
-      }
+            const success = await gatherIngredients(requirements)
+            
+            if (success) {
+               await executeCraft(rawRecipe, amount)
+               await depositResult()
+               if (!isTierAttempt) bot.chat(`Pronto! ${amount}x ${targetItemName} feito.`)
+               return true
+            }
+        } catch (e) {
+            logger(`[crafter] Erro na receita de ${targetItemName}: ${e.message}`)
+            console.error(e) 
+            continue
+        }
+      }
+      
+      if (!isTierAttempt) bot.chat(`Faltam materiais para ${targetItemName}.`)
+      return false
+  }
 
-      logger(`[crafter] Preciso de: ${JSON.stringify(ingredientsNeeded)}`)
+  function stopCurrentActions() {
+    if (bot.pathfinder?.stop) bot.pathfinder.stop()
+    if (bot.currentWindow) bot.currentWindow.close()
+    isCrafting = false
+  }
 
-      // 3. Buscar Materiais (Baseado na Opção A: Scavenger)
-      const success = await gatherIngredients(ingredientsNeeded)
-      if (!success) {
-        bot.chat("Não encontrei todos os materiais necessários no armazém.")
-        return
-      }
+  // --- LÓGICA DE CÁLCULO ---
 
-      // 4. Craftar (Workbench)
-      await executeCraft(recipe, amount)
+  function calculateRequirements(recipe, amount, itemName = 'unknown') {
+    debugRecipe(recipe, itemName)
+    const rawIds = []
 
-      // 5. Entregar (Base)
-      await depositResult()
+    // 1. Coleta os dados brutos da receita
+    if (recipe.ingredients) {
+      debugLog('COLETA', 'Usando recipe.ingredients')
+      recipe.ingredients.forEach(i => { if (i !== null && i !== undefined) rawIds.push(i) })
+    } 
+    else if (recipe.inShape) {
+      debugLog('COLETA', 'Usando recipe.inShape')
+      recipe.inShape.forEach(row => {
+        if (Array.isArray(row)) {
+          row.forEach(item => {
+             if (item !== null && item !== undefined) {
+                 rawIds.push(typeof item === 'object' ? item.id : item)
+             }
+          })
+        }
+      })
+    }
+    
+    // FILTRO CRÍTICO: Ignora IDs inválidos/negativos (ID DUMMY -1)
+    const finalCleanIds = []
+    rawIds.forEach(id => {
+        let itemId = id
+        
+        if (Array.isArray(id)) itemId = id[0] 
+        if (typeof id === 'object' && id !== null) itemId = id.id || -1
+        
+        if (typeof itemId === 'number' && itemId > 0) {
+            finalCleanIds.push(itemId)
+        }
+    })
 
-      bot.chat(`Pedido de ${itemName} concluído e guardado na base!`)
+    debugRawIds(finalCleanIds)
 
-    } catch (err) {
-      logger(`[crafter] Erro: ${err.message}`)
-      bot.chat("Deu erro no processo de craft. Verifique o console.")
-    } finally {
-      isCrafting = false
-      if (bot.currentWindow) bot.currentWindow.close()
-    }
-  }
+    const finalList = []
+    const counts = {}
+    
+    finalCleanIds.forEach(id => {
+        counts[id] = (counts[id] || 0) + 1
+    })
 
-  function stopCurrentActions() {
-    if (bot.pathfinder?.stop) bot.pathfinder.stop()
-    if (bot.currentWindow) bot.currentWindow.close()
-    isCrafting = false
-  }
+    for (const [id, count] of Object.entries(counts)) {
+        finalList.push({ ids: [parseInt(id)], count: count * amount })
+    }
+    
+    debugLog('RESULTADO', `FinalList (${finalList.length} tipos de item):`, finalList)
+    
+    return finalList.map(req => ({ ...req, count: req.count }))
+  }
 
-  // --- FUNÇÕES INTERNAS (Lógica de Negócio) ---
+  async function gatherIngredients(requirementsList) {
+    // ... (mantido inalterado) ...
+    const estoqueLoc = await bot.locations.get("estoque")
+    if (!estoqueLoc) throw new Error("Local 'estoque' não definido.")
 
-  async function gatherIngredients(requiredItemsMap) {
-    // Nota: Assume que bot.locations já está injetado e funcionando como no estoquista
-    const armazemLoc = await bot.locations.get("armazem")
-    if (!armazemLoc) throw new Error("Local 'armazem' não definido.")
+    if (bot.entity.position.distanceTo(new pf.goals.GoalNear(estoqueLoc.x, estoqueLoc.y, estoqueLoc.z, 1)) > 5) {
+        await moveTo(estoqueLoc)
+    }
 
-    bot.chat("Indo ao armazém buscar materiais...")
-    await moveTo(armazemLoc)
+    const missing = requirementsList.map(req => ({ ...req })) 
+    const chests = findChestsInZone(estoqueLoc)
 
-    const missing = { ...requiredItemsMap }
-    const chests = findChestsInZone(armazemLoc)
+    for (const chestBlock of chests) {
+      if (!enabled || missing.length === 0) break
+      await moveTo(chestBlock.position)
+      const window = await bot.openContainer(chestBlock)
+      try {
+        const containerItems = window.containerItems()
+        for (let i = missing.length - 1; i >= 0; i--) {
+          const req = missing[i]
+          const itemInChest = containerItems.find(item => req.ids.includes(item.type)) // Simplificado match
+          if (itemInChest) {
+            const qtyToWithdraw = Math.min(itemInChest.count, req.count)
+            await window.withdraw(itemInChest.type, null, qtyToWithdraw)
+            req.count -= qtyToWithdraw
+            if (req.count <= 0) missing.splice(i, 1)
+          }
+        }
+      } catch (err) { logger(`[crafter] Erro baú: ${err.message}`) } 
+      finally { window.close() }
+    }
+    
+    if (missing.length > 0) {
+        logger(`[crafter] Faltam materiais.`)
+        return false
+    }
+    
+    // Verificação de inventário
+    for (const req of requirementsList) {
+        const count = bot.inventory.items().filter(i => req.ids.includes(i.type)).reduce((a,b)=>a+b.count,0)
+        if (count < req.count) return false
+    }
+    logger(`[crafter] ✅ Todos os materiais estão no inventário!`)
+    return true
+  }
 
-    for (const chestBlock of chests) {
-      if (!enabled || Object.keys(missing).length === 0) break
+  // --- O CORAÇÃO DA CORREÇÃO ---
 
-      await moveTo(chestBlock.position)
-      const window = await bot.openContainer(chestBlock)
-      
-      try {
-        const containerItems = window.containerItems()
-        for (const reqIdStr of Object.keys(missing)) {
-          const reqId = Number(reqIdStr)
-          const qtyNeeded = missing[reqId]
-          const itemInChest = containerItems.find((i) => i.type === reqId)
+  function normalizeRecipeForMineflayer(rawRecipe) {
+      // Usamos JSON.parse(JSON.stringify) para garantir uma cópia profunda (Deep Copy)
+      const safeRecipe = JSON.parse(JSON.stringify(rawRecipe))
 
-          if (itemInChest) {
-            const qtyToWithdraw = Math.min(itemInChest.count, qtyNeeded)
-            await window.withdraw(reqId, null, qtyToWithdraw)
-            
-            missing[reqId] -= qtyToWithdraw
-            if (missing[reqId] <= 0) delete missing[reqId]
-          }
-        }
-      } catch (err) {
-        logger(`[crafter] Falha ao abrir baú: ${err.message}`)
-      } finally {
-        window.close()
-      }
-    }
-    
-    return Object.keys(missing).length === 0
-  }
+      // Usamos o ID -1, que é o padrão interno do prismarine-recipe para slots vazios.
+      const DUMMY_SLOT = { id: -1, count: 0 } 
 
-  async function executeCraft(recipe, amount) {
+      // 1. Corrige inShape (Receita com forma)
+      if (safeRecipe.inShape) {
+          safeRecipe.inShape = safeRecipe.inShape.map(row => {
+              if (!Array.isArray(row)) return row
+              return row.map(item => {
+                  if (item === null) return DUMMY_SLOT // <-- Substitui NULL por DUMMY
+                  
+                  if (typeof item === 'number') {
+                      return { id: item, count: 1 }
+                  }
+                  return item
+              })
+          })
+      }
+
+      // 2. Corrige ingredients (Receita sem forma)
+      if (safeRecipe.ingredients) {
+          safeRecipe.ingredients = safeRecipe.ingredients.map(item => {
+              if (item === null) return DUMMY_SLOT
+              if (typeof item === 'number') return { id: item, count: 1 }
+              return item
+          })
+      }
+
+      // 3. Injeta propriedades de resultado
+      safeRecipe.result = { 
+          id: rawRecipe.result.id, 
+          count: rawRecipe.result.count || 1 
+      };
+
+      return safeRecipe
+  }
+
+  async function executeCraft(rawRecipe, amount) {
     const wbLoc = await bot.locations.get("workbench")
     if (!wbLoc) throw new Error("Local 'workbench' não definido.")
 
-    bot.chat("Materiais em mãos. Indo para a bancada...")
     await moveTo(wbLoc)
-
     const tableBlock = bot.findBlock({
       matching: bot.registry.blocksByName["crafting_table"].id,
-      maxDistance: 4,
+      maxDistance: 5,
     })
+    if (!tableBlock) throw new Error("Bancada não encontrada!")
+    
+    // 1. Normaliza a receita
+    const finalRecipe = normalizeRecipeForMineflayer(rawRecipe)
+    
+    // ========================================
+    // CORREÇÃO CRÍTICA: INJETAR ITEM DUMMY
+    // ========================================
+    const DUMMY_ID = -1 
+    const DUMMY_COUNT = 64
+    const DUMMY_SLOT = 1 // Slot arbitrário seguro (diferente de 0/mão principal)
 
-    if (!tableBlock) throw new Error("Não vejo a bancada na área da workbench!")
-
-    await bot.craft(recipe, amount, tableBlock)
-  }
-
-  async function depositResult() {
-    const baseLoc = await bot.locations.get("base")
-    if (!baseLoc) throw new Error("Local 'base' não definido.")
-
-    await moveTo(baseLoc)
-    const chests = findChestsInZone(baseLoc)
-
-    for (const chestBlock of chests) {
-      if (bot.inventory.items().length === 0) break
-      
-      await moveTo(chestBlock.position)
-      const window = await bot.openContainer(chestBlock)
-      try {
-        const items = bot.inventory.items()
-        for (const item of items) {
-          // Opcional: Filtros de segurança para não guardar equipamentos
-          await window.deposit(item.type, item.metadata, item.count)
-        }
-      } catch (err) {
-        // Ignora erro de baú cheio
-      } finally {
-        window.close()
-      }
+    // Usa a classe Item corrigida que foi inicializada em createCrafter
+    // Se a ItemClass não estiver definida, algo deu errado na inicialização
+    if (!ItemClass || typeof ItemClass !== 'function') throw new Error("Erro interno: A classe Item não foi inicializada corretamente.")
+    
+    // Cria o item dummy
+    const DUMMY_ITEM = new ItemClass(DUMMY_ID, DUMMY_COUNT, null) 
+    
+    // Usa o método updateSlot para simular a presença do item no inventário
+    bot.inventory.updateSlot(DUMMY_SLOT, DUMMY_ITEM)
+    
+    logger(`[crafter] Executando craft com injeção de item dummy...`)
+    
+    try {
+        await bot.craft(finalRecipe, amount, tableBlock)
+    } finally {
+        // Remove o item dummy (passando null) do inventário simulado
+        bot.inventory.updateSlot(DUMMY_SLOT, null) 
     }
   }
 
-  // --- UTILITÁRIOS ---
+  async function depositResult() {
+    const baseLoc = await bot.locations.get("base")
+    if (!baseLoc) throw new Error("Local 'base' não definido.")
+    await moveTo(baseLoc)
+    const chests = findChestsInZone(baseLoc)
+    // ... lógica de depósito padrão ...
+    for (const chest of chests) {
+        if(bot.inventory.items().length === 0) break
+        const w = await bot.openContainer(chest)
+        try { 
+            for(const i of bot.inventory.items()) await w.deposit(i.type, null, i.count)
+        } catch(e){} finally { w.close() }
+    }
+  }
 
-  function findChestsInZone(loc) {
-    const minX = loc.x; const maxX = loc.x + (loc.width || 1)
-    const minZ = loc.z; const maxZ = loc.z + (loc.depth || 1)
-    const minY = loc.y - 1; const maxY = loc.y + 2
+  // --- UTILITÁRIOS ---
+  function findChestsInZone(loc) {
+    const minX = loc.x; const maxX = loc.x + (loc.width || 1)
+    const minZ = loc.z; const maxZ = loc.z + (loc.depth || 1)
+    return bot.findBlocks({
+        matching: [bot.registry.blocksByName['chest'].id, bot.registry.blocksByName['barrel']?.id].filter(Boolean),
+        maxDistance: 64, count: 200
+    }).map(pos => bot.blockAt(pos)).filter(b => 
+        b.position.x >= minX && b.position.x <= maxX &&
+        b.position.z >= minZ && b.position.z <= maxZ
+    ).sort((a, b) => bot.entity.position.distanceTo(a.position) - bot.entity.position.distanceTo(b.position))
+  }
 
-    return bot.findBlocks({
-        matching: [
-            bot.registry.blocksByName['chest'].id,
-            bot.registry.blocksByName['barrel']?.id
-        ].filter(Boolean),
-        maxDistance: 64, count: 200
-    })
-    .map(pos => bot.blockAt(pos))
-    .filter(b => 
-        b.position.x >= minX && b.position.x <= maxX &&
-        b.position.z >= minZ && b.position.z <= maxZ &&
-        b.position.y >= minY && b.position.y <= maxY
-    )
-    .sort((a, b) => bot.entity.position.distanceTo(a.position) - bot.entity.position.distanceTo(b.position))
-  }
+  async function moveTo(loc) {
+    const defaultMove = new Movements(bot)
+    defaultMove.canDig = false
+    defaultMove.canPlaceOn = false
+    bot.pathfinder.setMovements(defaultMove)
+    const goal = new goals.GoalNear(loc.x, loc.y, loc.z, 1)
+    await bot.pathfinder.goto(goal)
+  }
 
-  async function moveTo(loc) {
-    const defaultMove = new Movements(bot)
-    defaultMove.canDig = false
-    defaultMove.canPlaceOn = false
-    bot.pathfinder.setMovements(defaultMove)
-    
-    const goal = new goals.GoalNear(loc.x, loc.y, loc.z, 1)
-    await bot.pathfinder.goto(goal)
-  }
-
-  // Retorna a "API" pública desta instância
-  return { setEnabled, isEnabled, processOrder }
+  return { setEnabled, isEnabled, processOrder }
 }

@@ -124,19 +124,25 @@ export function createCommandHandler(stateManager, logger) {
       }
     }
 
-    function handleCraft()
-    {
-          const item = args[0]
-          const amount = args[1] ? parseInt(args[1]) : 1
-          
-          const crafter = bot.professions.get("crafter")
+    function handleCraft() {
+      const item = args[0]
+      const amount = args[1] ? parseInt(args[1]) : 1
 
-          // Verifica se existe E se está habilitado
-          if (crafter && crafter.isEnabled()) {
-            crafter.processOrder(item, amount)
-          } else {
-            bot.chat("A profissão de Crafter não está ativa.")
-          }
+      if (!item) {
+        bot.chat(`Uso: !${bot.username} craftar <item> [quantidade]`)
+        return
+      }
+
+      // AQUI MUDOU: Buscamos a profissão ativa pelo gerenciador
+      const crafter = bot.professions.get("crafter")
+
+      // Verificamos se ela existe E se está ativada
+      if (crafter && crafter.isEnabled()) {
+        // Chamamos o método público da factory
+        crafter.processOrder(item, amount)
+      } else {
+        bot.chat("A profissão de Crafter não está ativa no momento.")
+      }
     }
 
     function handleProfession() {
