@@ -123,15 +123,17 @@ export function createCommandHandler(stateManager, logger) {
       const professionName = (args[0] || "").toLowerCase()
       const action = (args[1] || "").toLowerCase()
 
-      if (professionName !== "lenhador") return
-      if (!bot.professions) return
+      const permitted_professions = ["lenhador","estoquista"]
 
+      if (!permitted_professions.includes(professionName)) return
+      if (!bot.professions) return
+      
       if (action === "on") {
-        logger?.("[command] ativando profissao lenhador")
-        bot.professions.enable("lenhador")
+        logger?.(`[command] ativando profissao: ${professionName}`)
+        bot.professions.enable(professionName)
       } else if (action === "off") {
-        logger?.("[command] desativando profissao lenhador")
-        bot.professions.disable("lenhador")
+        logger?.(`[command] desativando profissao: ${professionName}`)
+        bot.professions.disable(professionName)
       }
     }
 

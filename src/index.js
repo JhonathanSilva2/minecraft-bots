@@ -1,6 +1,8 @@
 import { startBot } from "./core/bot.js"
 import { getBotConfigs } from "./utils/getBotName.js"
 
+import "dotenv/config"
+
 const botConfigs = getBotConfigs()
 
 console.log(

@@ -3,12 +3,17 @@ import pf from "mineflayer-pathfinder"
 const { pathfinder } = pf
 import mcDataLoader from "minecraft-data"
 
+
 import { attachEventHandlers } from "./events.js"
 import { createBrain } from "../brain/brain.js"
 import { createCommandHandler } from "../commands/commandHandler.js"
 import { createProfessionManager } from "../professions/manager.js"
 import { createSmartMovement } from "../modules/smartMovement/index.js"
 import { writeFileSync } from "fs"
+
+import "dotenv/config"
+
+const address = process.env.SERVIDOR_ADDRESS
 
 function createLogger(botName) {
   return (...messages) => console.log(`[${botName}]`, ...messages)
@@ -18,7 +23,7 @@ export function startBot(name = "Max", options = {}) {
   const { defaultProfessions = [] } = options
 
   const bot = mineflayer.createBot({
-    host: "localhost",
+    host: address,
     port: 25565,
     username: name,
     version: "1.20.6",
