@@ -1,7 +1,18 @@
 import followCommand from "./followCommand.js"
 import stopCommand from "./stopCommand.js"
+import statusCommand from "./statusCommand.js"
+import localCommand from "./localCommand.js"
+import { gotoLocation } from "../navigation/gotoLocation.js"
 
-const KNOWN_COMMANDS = new Set(["seguir", "parar", "profissao", "profiss\u00e3o"])
+const KNOWN_COMMANDS = new Set([
+  "seguir",
+  "parar",
+  "profissao",
+  "profissão",
+  "status",
+  "local",
+  "armazem", // novo
+])
 
 export function createCommandHandler(stateManager, logger) {
   return (bot, username, message) => {
@@ -45,6 +56,26 @@ export function createCommandHandler(stateManager, logger) {
 
     if (command === "profissao" || command === "profiss\u00e3o") {
       handleProfession()
+      return
+    }
+
+    if (command === "status") {
+      handleStatus()
+      return
+    }
+
+    if (command === "local") {
+      handleLocal()
+      return
+    }
+
+    if (command === "armazem") {
+      handleStorage()
+      return
+    }
+
+    if (command === "ir") {
+      handleGoto()
     }
 
     function handleFollow() {
@@ -102,6 +133,53 @@ export function createCommandHandler(stateManager, logger) {
         logger?.("[command] desativando profissao lenhador")
         bot.professions.disable("lenhador")
       }
+    }
+
+    function handleStatus() {
+      const targets = args.map((name) => name.toLowerCase())
+      const targetAll = targets.length === 0 || targets.includes("all")
+
+      if (!targetAll && !targets.includes(bot.username.toLowerCase())) return
+
+      statusCommand(bot, logger)
+    }
+
+    function handleLocal() {
+      localCommand(bot, args, logger)
+    }
+
+    function handleGoto() {
+      const [locationName] = args
+      if (scope === "all" || rawPrefixName === bot.username || !hasBang) {
+        gotoLocation(bot, locationName, logger)
+      }
+    }
+
+    function handleStorage() {
+      const action = (args[0] || "").toLowerCase()
+
+      if (action === "guardar") {
+        logger?.(`[command] ${bot.username} -> armazem guardar`)
+        storeInventoryForBot(bot, logger)
+        return
+      }
+
+      if (action === "pegar") {
+        const itemName = (args[1] || "").toLowerCase()
+        const amount = Number(args[2] ?? "1")
+
+        if (!itemName) {
+          bot.chat("Uso: !<bot> armazem pegar <item> <quantidade>")
+          return
+        }
+
+        withdrawItemFromChest(bot, itemName, amount, logger)
+        return
+      }
+
+      bot.chat(
+        "Uso: !<bot> armazem guardar | !<bot> armazem pegar <item> <quantidade>"
+      )
     }
   }
 }

@@ -2,6 +2,8 @@ import pf from "mineflayer-pathfinder"
 const { Movements, goals } = pf
 const { GoalNear } = goals
 
+import { craftingManager } from "../crafting/craftingManager.js"
+
 const TREE_TYPES = [
   "oak_log",
   "birch_log",
@@ -53,6 +55,25 @@ export function createWoodcutter(bot, logger) {
 
   async function runCycle() {
     try {
+      // 1) Garantir machado
+      // const hasAxe = await craftingManager.ensureTool(bot, "axe", logger)
+
+      // if (!hasAxe) {
+      //   logger?.("[lenhador] sem machado — tentando craft novamente...")
+      //   return
+      // }
+
+      if (!enabled) return
+
+      // 2) Se tem pack de madeira, armazenar (placeholder)
+      const woodCount = countLogs(bot)
+      if (woodCount >= 64) {
+        logger?.("[lenhador] pack detectado — armazenando...")
+        await storeInventoryForBot(bot, logger)
+        return
+      }
+
+      // 3) Achar árvore
       const tree = findNearestTree()
       if (!tree || !enabled) return
 
@@ -69,9 +90,9 @@ export function createWoodcutter(bot, logger) {
   }
 
   function findNearestTree() {
-    const ids = TREE_TYPES.map((name) => bot.registry.blocksByName[name]?.id).filter(
-      Boolean
-    )
+    const ids = TREE_TYPES.map(
+      (name) => bot.registry.blocksByName[name]?.id
+    ).filter(Boolean)
 
     if (ids.length === 0) return null
 
@@ -83,16 +104,14 @@ export function createWoodcutter(bot, logger) {
 
     if (!found.length) return null
 
-    const blocks = found
+    return found
       .map((pos) => bot.blockAt(pos))
       .filter(Boolean)
       .sort(
         (a, b) =>
           bot.entity.position.distanceTo(a.position) -
           bot.entity.position.distanceTo(b.position)
-      )
-
-    return blocks[0]
+      )[0]
   }
 
   function findTrunkBase(pos) {
@@ -130,6 +149,17 @@ export function createWoodcutter(bot, logger) {
       await bot.dig(block)
       currentPos = currentPos.offset(0, 1, 0)
     }
+  }
+
+  function countLogs(bot) {
+    return bot.inventory
+      .items()
+      .filter((i) => i.name.includes("_log"))
+      .reduce((acc, i) => acc + i.count, 0)
+  }
+
+  async function storeInventoryForBot(bot, logger) {
+    logger?.("[storage] (placeholder) armazenando itens futuramente...")
   }
 
   return { setEnabled, isEnabled }
