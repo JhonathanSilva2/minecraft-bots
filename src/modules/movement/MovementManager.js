@@ -113,5 +113,113 @@ class MovementManager {
     await bot.waitForTicks(6)
     bot.setControlState("jump", false)
   }
+
+  async storeItemsInZone(zoneName, itemFilter) {
+    const bot = this.bot
+    const logger = this.logger
+
+    // 1. carregar zona
+    const zone = await bot.locations.get(zoneName)
+    if (!zone) {
+      logger?.(`[storage] zona '${zoneName}' não encontrada`)
+      return false
+    }
+
+    // 2. AQUI: USANDO O MÉTODO findChestsInZone COMO VOCÊ PEDIU
+    const chests = this.findChestsInZone(zone)
+    if (!chests.length) {
+      logger?.(`[storage] nenhum baú encontrado na zona '${zoneName}'`)
+      return false
+    }
+
+    // 3. baú mais próximo
+    const chestBlock = chests[0]
+
+    // 4. mover até o baú
+    try {
+      await bot.pathfinder.goto(
+        new goals.GoalNear(
+          chestBlock.position.x,
+          chestBlock.position.y,
+          chestBlock.position.z,
+          1
+        )
+      )
+    } catch (err) {
+      logger?.(`[storage] não consegui chegar no baú: ${err.message}`)
+      return false
+    }
+
+    // 5. abrir o baú
+    let chest
+    try {
+      chest = await bot.openChest(chestBlock)
+    } catch (err) {
+      logger?.(`[storage] não consegui abrir o baú: ${err.message}`)
+      return false
+    }
+
+    // 6. filtrar itens
+    const items = bot.inventory.items().filter(itemFilter)
+    if (!items.length) {
+      chest.close()
+      return true
+    }
+
+    // 7. depositar
+    for (const item of items) {
+      try {
+        await chest.deposit(item.type, null, item.count)
+      } catch (err) {
+        logger?.(`[storage] erro ao depositar ${item.name}: ${err.message}`)
+      }
+    }
+
+    chest.close()
+    logger?.(`[storage] itens armazenados com sucesso em '${zoneName}'`)
+
+    return true
+  }
+
+  // Converte a zona (x, y, z, width, depth) em uma lista de blocos de baú
+  findChestsInZone(loc) {
+    const bot = this.bot
+
+    const minX = loc.x
+    const maxX = loc.x + (loc.width || 1)
+    const minZ = loc.z
+    const maxZ = loc.z + (loc.depth || 1)
+    const minY = loc.y - 1
+    const maxY = loc.y + 2
+
+    const allChests = bot.findBlocks({
+      matching: [
+        bot.registry.blocksByName["chest"]?.id,
+        bot.registry.blocksByName["barrel"]?.id,
+        bot.registry.blocksByName["trapped_chest"]?.id,
+      ].filter(Boolean),
+      maxDistance: 64,
+      count: 200,
+    })
+
+    return allChests
+      .map((pos) => bot.blockAt(pos))
+      .filter((block) => {
+        const p = block.position
+        return (
+          p.x >= minX &&
+          p.x <= maxX &&
+          p.z >= minZ &&
+          p.z <= maxZ &&
+          p.y >= minY &&
+          p.y <= maxY
+        )
+      })
+      .sort(
+        (a, b) =>
+          bot.entity.position.distanceTo(a.position) -
+          bot.entity.position.distanceTo(b.position)
+      )
+  }
 }
 export default MovementManager
