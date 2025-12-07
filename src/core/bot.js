@@ -8,9 +8,12 @@ import { createBrain } from "../brain/brain.js"
 import { createCommandHandler } from "../commands/commandHandler.js"
 import { createProfessionManager } from "../professions/manager.js"
 import { writeFileSync } from "fs"
+
+//MANAGERS
 import MovementManager from "../modules/movement/MovementManager.js"
 import LocationManager from "../modules/location/LocationManager.js"
 import CraftManager from "../modules/craft/CraftManager.js" 
+import MinerManager from "../modules/miner/MinerManager.js"
 
 import "dotenv/config"
 
@@ -36,6 +39,8 @@ export function startBot(name = "Max", options = {}) {
   bot.movement = new MovementManager(bot)
   bot.locations = new LocationManager(bot, logger)
   bot.crafting = new CraftManager(bot, logger)
+  bot.mining = new MinerManager(bot, logger)
+  
   
 
   // Registrar módulos no bot (injeção de dependências)
@@ -67,6 +72,9 @@ export function startBot(name = "Max", options = {}) {
 
     bot.brain.initialize(bot)
     attachEventHandlers(bot, logger)
+
+    //bot.professions.register("crafter", createCrafter(bot, logger))
+    //bot.professions.register("miner", createMiner(bot, logger))
 
     if (defaultProfessions.length) {
       for (const professionName of defaultProfessions) {

@@ -12,7 +12,8 @@ const KNOWN_COMMANDS = new Set([
   "status",
   "local",
   "armazem",
-  "craftar"
+  "craftar",
+  "minerar"
 ])
 
 export function createCommandHandler(stateManager, logger) {
@@ -84,6 +85,11 @@ export function createCommandHandler(stateManager, logger) {
       return
     }
 
+    if (command === "minerar") {
+      handleMine()
+      return
+    }
+
     function handleFollow() {
       if ((args[0] || "").toLowerCase() === "me") {
         logger?.(`[command] ${bot.username} -> seguir ${username}`)
@@ -148,11 +154,68 @@ export function createCommandHandler(stateManager, logger) {
       }
     }
 
+    function handleMine() {
+      const inputOrAction = (args[0] || "").toLowerCase()
+      const directionInput = (args[1] || "").toLowerCase()
+
+      const miner = bot.professions.get("miner")
+      if (!miner) {
+        bot.chat("A profissão de Minerador não está ativa.")
+        return
+      }
+
+      // 1. Comando de Parar
+      if (['parar', 'stop', 'off'].includes(inputOrAction)) {
+        miner.setEnabled(false)
+        return
+      }
+
+      if (!inputOrAction) {
+        bot.chat(`Uso: !${bot.username} minerar <minerio|parar> [norte|sul|leste|oeste]`)
+        return
+      }
+
+      // 2. Configuração de Direção e Base
+      const directionMap = {
+        'norte': 'north', 'north': 'north',
+        'sul': 'south', 'south': 'south',
+        'leste': 'east', 'east': 'east',
+        'oeste': 'west', 'west': 'west'
+      }
+
+      // Usa a direção informada ou 'norte' como padrão
+      const dir = directionMap[directionInput] || 'north'
+
+      // Define a base como a posição atual do bot no momento do comando
+      const currentPos = bot.entity.position.clone()
+
+      // Define o ponto inicial da mineração 20 blocos à frente
+      const offset = {
+        'north': [0, -20],
+        'south': [0, 20],
+        'east': [20, 0],
+        'west': [-20, 0]
+      }[dir]
+
+      const mineStart = currentPos.offset(offset[0], 0, offset[1])
+
+      // 3. Define Alvos (Minérios)
+      // Traduz "ferro" -> ['iron_ore', ...] ou usa o input direto
+      const targetOres = ORE_ALIASES[inputOrAction] || [inputOrAction]
+
+      // 4. Aplica e Inicia
+      bot.chat(`Configurando mina: Base aqui, Túnel iniciando a 20 blocos para ${dir}. Alvo: ${inputOrAction}`)
+      
+      miner.setConfig(currentPos, mineStart, dir)
+      miner.setTarget(targetOres) // Isso já chama setEnabled(true) internamente no seu miner.js
+      miner.setEnabled(true)
+    }
+
     function handleProfession() {
       const professionName = (args[0] || "").toLowerCase()
       const action = (args[1] || "").toLowerCase()
 
-      const permitted_professions = ["lenhador", "estoquista", "crafter"]
+      const permitted_professions = ["lenhador", "estoquista", "crafter, minerador"]
 
       if (!permitted_professions.includes(professionName)) return
       if (!bot.professions) return

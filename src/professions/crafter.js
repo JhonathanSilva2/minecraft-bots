@@ -102,7 +102,7 @@ export function createCrafter(bot, logger) {
     } catch (err) {
         logger(`[Crafter] Erro Fatal: ${err.message}`)
         console.error(err)
-        bot.chat(`Erro ao processar pedido. Ver console.`)
+        bot.chat(`Erro ao processar pedido.`)
         queue.shift()
     } finally {
         isWorking = false

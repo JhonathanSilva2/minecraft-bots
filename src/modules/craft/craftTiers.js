@@ -32,3 +32,26 @@ export const CRAFT_TIERS = {
   'boots': ['diamond_boots', 'iron_boots', 'golden_boots', 'leather_boots'],
   'botas': ['diamond_boots', 'iron_boots', 'golden_boots', 'leather_boots']
 }
+
+export const ORE_ALIASES = {
+    'ferro': ['iron_ore', 'deepslate_iron_ore', 'raw_iron_block'],
+    'iron': ['iron_ore', 'deepslate_iron_ore', 'raw_iron_block'],
+    
+    'carvao': ['coal_ore', 'deepslate_coal_ore', 'coal_block'],
+    'coal': ['coal_ore', 'deepslate_coal_ore', 'coal_block'],
+    
+    'diamante': ['diamond_ore', 'deepslate_diamond_ore'],
+    'diamond': ['diamond_ore', 'deepslate_diamond_ore'],
+    
+    'ouro': ['gold_ore', 'deepslate_gold_ore', 'nether_gold_ore'],
+    'gold': ['gold_ore', 'deepslate_gold_ore', 'nether_gold_ore'],
+    
+    'cobre': ['copper_ore', 'deepslate_copper_ore'],
+    'copper': ['copper_ore', 'deepslate_copper_ore'],
+    
+    'lapis': ['lapis_ore', 'deepslate_lapis_ore'],
+    'redstone': ['redstone_ore', 'deepslate_redstone_ore'],
+    'esmeralda': ['emerald_ore', 'deepslate_emerald_ore'],
+    
+    'pedra': ['stone', 'cobblestone', 'deepslate', 'diorite', 'andesite', 'granite'] 
+}
