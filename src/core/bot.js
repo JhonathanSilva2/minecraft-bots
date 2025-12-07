@@ -14,7 +14,7 @@ import MovementManager from "../modules/movement/MovementManager.js"
 import LocationManager from "../modules/location/LocationManager.js"
 import CraftManager from "../modules/craft/CraftManager.js" 
 import MinerManager from "../modules/miner/MinerManager.js"
-import LogisticsManager from "../modules/logistic/LogisticsManager.js"
+import LogisticsManager from "../modules/logistic/LogisticManager.js"
 
 import "dotenv/config"
 
