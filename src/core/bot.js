@@ -14,6 +14,7 @@ import MovementManager from "../modules/movement/MovementManager.js"
 import LocationManager from "../modules/location/LocationManager.js"
 import CraftManager from "../modules/craft/CraftManager.js" 
 import MinerManager from "../modules/miner/MinerManager.js"
+import LogisticsManager from "../modules/logistic/LogisticsManager.js"
 
 import "dotenv/config"
 
@@ -39,6 +40,7 @@ export function startBot(name = "Max", options = {}) {
   bot.movement = new MovementManager(bot)
   bot.locations = new LocationManager(bot, logger)
   bot.crafting = new CraftManager(bot, logger)
+  bot.logistics = new LogisticsManager(bot, logger)
   bot.mining = new MinerManager(bot, logger)
   
   

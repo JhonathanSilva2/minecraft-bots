@@ -3,26 +3,19 @@ import prismarineItem from 'prismarine-item'
 
 const { goals } = pf
 
-// LISTA DE ITENS QUE CAUSAM LOOP (Matérias-primas que têm receitas reversíveis de bloco)
-// Se o bot precisar desses itens, ele DEVE falhar o craft e ir buscar no baú/estoque.
+// Matérias-primas que não devem ser craftadas recursivamente para evitar loops
+// Ex: Não tentar fazer Diamante a partir de Bloco de Diamante se o objetivo é ter Diamante
 const BLOCK_RECURSION_FOR = new Set([
-    'diamond', 
-    'iron_ingot', 
-    'gold_ingot', 
-    'copper_ingot',
-    'emerald', 
-    'lapis_lazuli', 
-    'redstone', 
-    'coal', 
-    'netherite_ingot',
-    'slime_ball',
-    'wheat', // Evita loop com Hay Bale
-    'bone_meal', // Evita loop com Bone Block
-    'iron_nugget', // Evita loop com Ingot
-    'gold_nugget',
-    'bamboo', // Evita loop com Bamboo Block/Planks em versões novas
-    'glowstone_dust'
+    'diamond', 'iron_ingot', 'gold_ingot', 'copper_ingot', 'emerald', 
+    'lapis_lazuli', 'redstone', 'coal', 'netherite_ingot', 'slime_ball',
+    'wheat', 'bone_meal', 'iron_nugget', 'gold_nugget', 'bamboo', 'glowstone_dust'
 ])
+
+// Prioridade de combustíveis para usar na fornalha
+const FUEL_PRIORITY = [
+    'coal', 'charcoal', 'lava_bucket', 'blaze_rod', 'coal_block', 
+    'dried_kelp_block', 'log', 'planks', 'stick'
+]
 
 export default class CraftManager {
   constructor(bot, logger) {
@@ -40,78 +33,202 @@ export default class CraftManager {
   }
 
   // ======================================================
+  // SISTEMA DE FUNDIÇÃO (FORNALHA)
+  // ======================================================
+
+  /**
+   * Gerencia todo o ciclo de uso de uma fornalha:
+   * Encontrar -> Abastecer (Item + Combustível) -> Aguardar -> Coletar.
+   */
+  async smeltItem(itemName, count = 1) {
+    const { bot, logger } = this
+
+    // 1. Validação e busca de receita de fundição
+    const targetItem = bot.registry.itemsByName[itemName]
+    if (!targetItem) throw new Error(`Item desconhecido: ${itemName}`)
+
+    const allRecipes = bot.mcData.recipes[targetItem.id] || []
+    const smeltingRecipe = allRecipes.find(r => !r.inShape && r.ingredients && r.ingredients.length === 1)
+
+    if (!smeltingRecipe) {
+        throw new Error(`Não encontrei receita de fundição para ${itemName}`)
+    }
+
+    const inputId = Array.isArray(smeltingRecipe.ingredients[0]) 
+        ? smeltingRecipe.ingredients[0][0] 
+        : smeltingRecipe.ingredients[0]
+    
+    const inputItemData = bot.registry.items[inputId]
+
+    // 2. Verificação de recursos (Input e Combustível)
+    const inputCount = this.countInInventory([inputId])
+    if (inputCount < count) {
+        throw new Error(`Falta ${inputItemData.name} para fundir. Tenho: ${inputCount}, Preciso: ${count}`)
+    }
+
+    const fuel = this._getBestFuel()
+    if (!fuel) {
+        throw new Error("Sem combustível no inventário.")
+    }
+
+    // 3. Localização e Movimento
+    const furnaceBlock = bot.findBlock({
+        matching: bot.registry.blocksByName.furnace.id,
+        maxDistance: 32
+    })
+
+    if (!furnaceBlock) throw new Error("Nenhuma fornalha encontrada por perto.")
+
+    if (bot.movement) {
+        await bot.movement.goToBlock(furnaceBlock)
+    } else {
+        const { goals } = await import("mineflayer-pathfinder")
+        await bot.pathfinder.goto(new goals.GoalNear(furnaceBlock.position.x, furnaceBlock.position.y, furnaceBlock.position.z, 1.5))
+    }
+
+    // 4. Operação da Fornalha
+    const furnace = await bot.openFurnace(furnaceBlock)
+    
+    try {
+        // Limpa input anterior se for diferente
+        if (furnace.inputItem && furnace.inputItem.type !== inputId) {
+             await furnace.takeInput()
+        }
+        
+        // Abastece a fornalha
+        await furnace.putInput(inputId, null, count)
+
+        if (furnace.fuelItem && furnace.fuelItem.type !== fuel.type) {
+            await furnace.takeFuel()
+        }
+        
+        await furnace.putFuel(fuel.type, null, Math.min(fuel.count, 64))
+
+        logger?.("[CraftManager] Fundindo itens...")
+
+        // 5. Monitoramento do processo (Event Loop)
+        await new Promise((resolve, reject) => {
+            let collectedCount = 0
+            
+            const onUpdate = async () => {
+                // Coleta produto se disponível
+                if (furnace.outputItem && furnace.outputItem.count > 0) {
+                    try {
+                        const taken = await furnace.takeOutput()
+                        if (taken) collectedCount += taken.count
+                    } catch (err) {}
+                }
+
+                // Reabastece combustível se necessário
+                if (furnace.fuel === 0 && furnace.fuelItem === null && collectedCount < count) {
+                    const newFuel = this._getBestFuel()
+                    if (newFuel) {
+                        furnace.putFuel(newFuel.type, null, 1).catch(() => {})
+                    } else {
+                        cleanup()
+                        reject(new Error("Acabou o combustível!"))
+                    }
+                }
+
+                // Finaliza se completou
+                if (collectedCount >= count) {
+                    cleanup()
+                    resolve()
+                }
+                
+                // Erro: Input acabou antes de terminar
+                if (!furnace.inputItem && collectedCount < count) {
+                     if (!furnace.outputItem) {
+                        cleanup()
+                        resolve() // Retorna o que conseguiu
+                     }
+                }
+            }
+
+            const cleanup = () => {
+                furnace.removeListener('update', onUpdate)
+            }
+
+            furnace.on('update', onUpdate)
+        })
+
+    } catch (err) {
+        logger?.(`[CraftManager] Erro na fornalha: ${err.message}`)
+        throw err
+    } finally {
+        furnace.close()
+    }
+  }
+
+  _getBestFuel() {
+    const items = this.bot.inventory.items()
+    for (const fuelName of FUEL_PRIORITY) {
+        const found = items.find(i => i.name === fuelName || i.name.includes(fuelName))
+        if (found) return found
+    }
+    return null
+  }
+
+  // ======================================================
   // LÓGICA RECURSIVA (RESOLUÇÃO DE DEPENDÊNCIAS)
   // ======================================================
 
+  /**
+   * Tenta craftar um item e todos os seus pré-requisitos.
+   * Ex: Para craftar uma bancada, primeiro crafta as tábuas de madeira necessárias.
+   */
   async craftRecursively(itemName, count) {
     const { bot, logger } = this
     
-    // --- CORREÇÃO DO LOOP INFINITO ---
-    // Se o item for uma matéria-prima que causa loop (ex: diamante),
-    // retornamos false imediatamente para forçar a busca no estoque.
+    // Impede loop infinito em receitas reversíveis (Bloco <-> Minério)
     if (BLOCK_RECURSION_FOR.has(itemName)) {
-        // Verifica se JÁ TEMOS no inventário (caso tenhamos, não é craft, é uso)
         const itemData = bot.registry.itemsByName[itemName]
         if (itemData) {
             const currentCount = this.countInInventory([itemData.id])
             if (currentCount >= count) return true
         }
-        // Se não tem, retorna false (não tente craftar Diamante a partir de Bloco de Diamante)
         return false 
     }
-    // ----------------------------------
 
     this.recursionDepth++
-
     if (this.recursionDepth > 10) {
-        this.recursionDepth-- // Importante decrementar antes do throw para não travar futuras chamadas se o catch for externo
-        throw new Error(`Profundidade máxima de craft excedida para ${itemName} (loop infinito?)`)
+        this.recursionDepth-- 
+        throw new Error(`Profundidade limite excedida para ${itemName}`)
     }
 
     try {
         const itemData = bot.registry.itemsByName[itemName]
         if (!itemData) throw new Error(`Item desconhecido: ${itemName}`)
 
-        // 1. Verifica se já temos o item pronto
+        // Verifica inventário atual
         const currentCount = this.countInInventory([itemData.id])
-        if (currentCount >= count) {
-            return true 
-        }
+        if (currentCount >= count) return true 
 
         const needed = count - currentCount
-        
-        // 2. Busca receitas
         const recipes = this.getRecipes(itemName)
-        if (!recipes) {
-            return false 
-        }
+        if (!recipes) return false 
 
-        // 3. Tenta cada receita possível
+        // Tenta encontrar uma receita viável
         for (const recipe of recipes) {
             const outputCount = recipe.result.count
             const craftsNeeded = Math.ceil(needed / outputCount)
-            
             const requirements = this.calculateRequirements(recipe, craftsNeeded)
             let ingredientsOK = true
 
-            // Verifica cada ingrediente
+            // Verifica e prepara cada ingrediente
             for (const req of requirements) {
                 const currentIngCount = this.countInInventory(req.ids)
                 
                 if (currentIngCount < req.count) {
                     const missingIng = req.count - currentIngCount
-                    
-                    // Pega o nome do primeiro item aceito
                     const ingName = bot.registry.items[req.ids[0]].name
                     
-                    // Evita log excessivo se for matéria prima bloqueada
                     if (!BLOCK_RECURSION_FOR.has(ingName)) {
-                        logger?.(`[CraftManager] Falta ${missingIng}x ${ingName} para fazer ${itemName}. Tentando criar...`)
+                        logger?.(`[CraftManager] Criando sub-item: ${missingIng}x ${ingName}`)
                     }
                     
-                    // --- RECURSIVIDADE ---
+                    // Chamada Recursiva
                     const subSuccess = await this.craftRecursively(ingName, missingIng)
-                    
                     if (!subSuccess) {
                         ingredientsOK = false
                         break 
@@ -133,50 +250,41 @@ export default class CraftManager {
   }
 
   // ======================================================
-  // EXECUÇÃO TÉCNICA 
+  // EXECUÇÃO TÉCNICA (INTERAÇÃO COM O MUNDO)
   // ======================================================
 
   async craft(rawRecipe, amount, workbenchLocationName = "workbench") {
       const { bot, logger } = this
 
-      // 1. Ir até a bancada (apenas se necessário e se location existir)
+      // Move-se para a bancada se necessário
       if (workbenchLocationName && bot.locations) {
           const wbLoc = await bot.locations.get(workbenchLocationName)
-          // Só vai até a mesa se ela for realmente necessária ou se estivermos longe
-          // (Lógica simplificada: sempre tenta ir se tiver location)
           if (wbLoc) {
             if (bot.movement) await bot.movement.gotoLocation(workbenchLocationName)
             else {
-                // Fallback simples
                 const goal = new goals.GoalNear(wbLoc.x, wbLoc.y, wbLoc.z, 1.5)
                 await bot.pathfinder.goto(goal)
             }
           }
       }
 
-      // 2. Encontrar o bloco físico
       const tableBlock = bot.findBlock({ 
           matching: (blk) => blk.name === 'crafting_table',
           maxDistance: 6 
       })
 
-      // 3. Preparar Receita
       const finalRecipe = this._normalizeRecipeForMineflayer(rawRecipe)
       
-      // Slot Hack para Mineflayer não reclamar de inventário vazio
-      const DUMMY_SLOT = 36 // Slot do inventário principal (evita hotbar)
+      // Slot Hack: Evita erros do Mineflayer ao manipular inventário vazio
+      const DUMMY_SLOT = 36 
       const DUMMY_ITEM = new this.ItemClass(-1, 64, null) 
-
-      // Nota: Usar updateSlot com item ID -1 pode ser arriscado em alguns servidores,
-      // mas funciona bem para "enganar" validações client-side do mineflayer antigo.
-      // Se der erro de "window not found", remova essa parte do dummy.
       bot.inventory.updateSlot(DUMMY_SLOT, DUMMY_ITEM)
       
       try {
           await bot.craft(finalRecipe, amount, tableBlock || null)
-          logger?.(`[CraftManager] Craft concluído: ${amount}x loops da receita.`)
+          logger?.(`[CraftManager] Craftado: ${amount}x`)
       } catch (err) {
-          logger?.(`[CraftManager] Erro no bot.craft: ${err.message}`)
+          logger?.(`[CraftManager] Erro técnico: ${err.message}`)
           throw err
       } finally {
           bot.inventory.updateSlot(DUMMY_SLOT, null) 

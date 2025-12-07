@@ -9,7 +9,7 @@ export default class MinerManager {
     this.logger = logger
     this.isMining = false
     
-    // Vetores de direção para cavar escada (Frente + Baixo)
+    // Vetores de direção para cálculos de túneis (Frente + Baixo)
     this.directions = {
         north: new Vec3(0, 0, -1),
         south: new Vec3(0, 0, 1),
@@ -18,48 +18,55 @@ export default class MinerManager {
     }
   }
 
-  /**
-   * Verifica se temos uma picareta válida
-   */
+  // ======================================================
+  // UTILITÁRIOS DE INVENTÁRIO
+  // ======================================================
+
   hasPickaxe() {
     return this.bot.inventory.items().some(i => i.name.includes('pickaxe'))
   }
 
-  /**
-   * Conta quantos itens desse tipo temos
-   */
   countItem(itemName) {
     return this.bot.inventory.items()
         .filter(i => i.name === itemName)
         .reduce((acc, i) => acc + i.count, 0)
   }
 
+  // ======================================================
+  // AÇÃO BÁSICA DE MINERAÇÃO
+  // ======================================================
+
   /**
-   * Executa a quebra de um bloco específico
+   * Move o bot até o alcance do bloco, equipa a ferramenta e quebra.
+   * Inclui verificação de segurança contra líquidos.
    */
   async mineBlockAt(pos) {
     const block = this.bot.blockAt(pos)
     if (!block || block.type === 0) return true // Já é ar
 
-    // Se for bedrock ou indestrutível, retorna false
+    // Verifica se é inquebrável (Bedrock) ou muito duro
     if (block.hardness === null || block.hardness > 100) return false
 
-    // Segurança: Líquidos
-    const liquid = this.bot.blockAt(pos.offset(0, 1, 0)) // Bloco acima
+    // Segurança: Verifica se há líquidos (lava/água) logo acima do bloco alvo
+    const liquid = this.bot.blockAt(pos.offset(0, 1, 0)) 
     if (liquid && (liquid.name === 'lava' || liquid.name === 'water')) {
-        this.logger?.("[MinerManager] Perigo: Líquido detectado acima!")
+        this.logger?.("[MinerManager] Perigo: Líquido detectado acima! Abortando.")
         return false
     }
 
     try {
+        // 1. Aproxima-se do bloco (Raio 4)
         const goal = new goals.GoalNear(pos.x, pos.y, pos.z, 4)
         await this.bot.pathfinder.goto(goal)
         
+        // 2. Equipa ferramenta adequada
         await this.bot.tool.equipForBlock(block, { requireHarvest: true })
+        
+        // 3. Quebra
         await this.bot.dig(block)
         
-        // Delay pequeno para coletar
-        await new Promise(r => setTimeout(r, 200))
+        // Pequeno delay para permitir que o servidor processe o drop e o bot colete
+        await new Promise(r => setTimeout(r, 250))
         return true
     } catch (err) {
         this.logger?.(`[MinerManager] Erro ao cavar: ${err.message}`)
@@ -67,10 +74,13 @@ export default class MinerManager {
     }
   }
 
+  // ======================================================
+  // ESTRATÉGIAS DE ESCAVAÇÃO
+  // ======================================================
+
   /**
-   * Calcula e quebra os blocos para formar o próximo degrau da escada
-   * Padrão: 1x2 (Altura) descendo 1 bloco a cada passo
-   * @param {string} cardinalDirection - 'north', 'south', 'east', 'west'
+   * Cava um "degrau" de escada (túnel 1x2 descendo).
+   * Calcula as posições relativas baseadas na direção cardeal.
    */
   async digStaircaseStep(cardinalDirection) {
     const dir = this.directions[cardinalDirection]
@@ -78,27 +88,66 @@ export default class MinerManager {
 
     const botPos = this.bot.entity.position.floored()
     
-    // Onde vamos pisar a seguir (Frente + Baixo)
+    // Calcula onde o bot vai pisar no próximo passo (Frente + Baixo)
     const nextStandPos = botPos.plus(dir).offset(0, -1, 0)
 
-    // Blocos para quebrar para liberar o espaço (Cabeça e Pé na posição alvo)
-    const targetHead = nextStandPos.offset(0, 1, 0) // Cabeça
-    const targetFeet = nextStandPos // Pé
+    // Blocos que precisam ser removidos para o bot caber
+    const targetHead = nextStandPos.offset(0, 1, 0) // Espaço da cabeça
+    const targetFeet = nextStandPos // Espaço dos pés
     
-    // Às vezes precisamos limpar o bloco na frente da cabeça atual antes de descer
+    // Bloco à frente da cabeça atual (para não bater a cabeça ao descer)
     const frontHead = botPos.plus(dir).offset(0, 1, 0)
 
-    this.logger?.(`[MinerManager] Cavando degrau em direção ${cardinalDirection}...`)
+    this.logger?.(`[MinerManager] Cavando degrau para ${cardinalDirection}...`)
 
-    // Sequência de quebra segura
-    await this.mineBlockAt(frontHead) // Limpa frente cima
-    await this.mineBlockAt(targetHead) // Alvo Cima
-    await this.mineBlockAt(targetFeet) // Alvo Baixo
+    // Ordem de quebra: Cima -> Frente -> Baixo (Geralmente mais seguro)
+    await this.mineBlockAt(frontHead) 
+    await this.mineBlockAt(targetHead) 
+    await this.mineBlockAt(targetFeet) 
 
-    // Move para o degrau criado
+    // Move o bot para o degrau recém-criado para continuar o ciclo
     const moveGoal = new goals.GoalBlock(nextStandPos.x, nextStandPos.y, nextStandPos.z)
     await this.bot.pathfinder.goto(moveGoal)
     
     return true
+  }
+
+  /**
+   * Algoritmo "Flood Fill" para minerar um veio inteiro de minérios conectados.
+   * Útil para carvão, ferro, cobre, etc.
+   */
+  async mineVein(startingBlock) {
+    const oreType = startingBlock.type
+    
+    const visited = new Set() // Evita processar o mesmo bloco duas vezes
+    const toMine = [startingBlock] // Fila de blocos para minerar
+
+    while (toMine.length > 0) {
+        const current = toMine.shift()
+        const key = current.position.toString()
+        
+        if (visited.has(key)) continue
+        visited.add(key)
+
+        // Minera o bloco atual
+        const success = await this.mineBlockAt(current.position)
+        if (!success) continue // Se falhou (ex: lava), não procura vizinhos a partir dele
+
+        // Procura vizinhos do mesmo tipo (Raio curto para garantir adjacência)
+        const neighbors = this.bot.findBlocks({
+            matching: oreType,
+            maxDistance: 2, 
+            count: 10,
+            point: current.position
+        })
+
+        for (const vec of neighbors) {
+            // Verifica se já visitamos este vizinho
+            if (!visited.has(vec.toString())) {
+                const block = this.bot.blockAt(vec)
+                if (block) toMine.push(block)
+            }
+        }
+    }
   }
 }

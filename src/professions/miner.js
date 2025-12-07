@@ -133,7 +133,7 @@ export function createMiner(bot, logger) {
         return !keep
     }
 
-    await bot.movement.storeItemsInZone("estoque", itemsToDeposit)
+    await bot.logistics.storeItemsInZone("estoque", itemsToDeposit)
     
     if (!manager.hasPickaxe()) {
         currentState = STATE.WAITING_FOR_TOOL
@@ -153,7 +153,7 @@ export function createMiner(bot, logger) {
     for(const p of pickaxes) wanted.push({ ids: [bot.registry.itemsByName[p]?.id], count: 1 })
     
     try {
-        await bot.movement.retrieveItemsFromZone("estoque", wanted.filter(x => x.ids[0]))
+        await bot.logistics.retrieveItemsFromZone("estoque", wanted.filter(x => x.ids[0]))
     } catch (e) {
         // Ignora erro se não achar
     }
