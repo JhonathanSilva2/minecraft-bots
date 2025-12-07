@@ -41,7 +41,7 @@ export function createMiner(bot, logger) {
     if (value) {
         if (!CONFIG.baseLocation) CONFIG.baseLocation = bot.entity.position.clone()
         if (!CONFIG.mineStartLocation) {
-            CONFIG.mineStartLocation = CONFIG.baseLocation.offset(30, 0, 0)
+            CONFIG.mineStartLocation = CONFIG.baseLocation.offset(-30, 0, 0)
         }
         
         currentState = STATE.TRAVELING_TO_MINE

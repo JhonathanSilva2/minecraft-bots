@@ -4,7 +4,7 @@ const { GoalNear } = goals
 import { Vec3 } from "vec3"
 
 // IMPORTAÇÃO DOS GRUPOS
-import { ITEM_GROUPS } from "./craft/craftTiers.js"
+import { ITEM_GROUPS } from "../modules/craft/craftTiers.js"
 
 // Lista de itens prioritários (materiais de construção e drops comuns)
 // Estes itens serão depositados primeiro quando buscarmos um baú vazio.
