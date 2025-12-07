@@ -2,6 +2,7 @@ import followCommand from "./followCommand.js"
 import stopCommand from "./stopCommand.js"
 import statusCommand from "./statusCommand.js"
 import localCommand from "./localCommand.js"
+import { CRAFT_TIERS } from "../modules/craft/craftTiers.js"
 
 const KNOWN_COMMANDS = new Set([
   "seguir",
@@ -125,21 +126,23 @@ export function createCommandHandler(stateManager, logger) {
     }
 
     function handleCraft() {
-      const item = args[0]
+      const itemInput = (args[0] || "").toLowerCase()
       const amount = args[1] ? parseInt(args[1]) : 1
 
-      if (!item) {
+      if (!itemInput) {
         bot.chat(`Uso: !${bot.username} craftar <item> [quantidade]`)
         return
       }
 
-      // AQUI MUDOU: Buscamos a profissão ativa pelo gerenciador
+      // Busca a profissão
       const crafter = bot.professions.get("crafter")
 
-      // Verificamos se ela existe E se está ativada
-      if (crafter && crafter.isEnabled()) {
-        // Chamamos o método público da factory
-        crafter.processOrder(item, amount)
+      if (crafter) {
+        // Verifica se é uma categoria (ex: "machado")
+        // Se for, passa a lista. Se não, passa a string direta.
+        const candidates = CRAFT_TIERS[itemInput] || itemInput
+        
+        crafter.addOrder(candidates, amount)
       } else {
         bot.chat("A profissão de Crafter não está ativa no momento.")
       }
@@ -149,7 +152,7 @@ export function createCommandHandler(stateManager, logger) {
       const professionName = (args[0] || "").toLowerCase()
       const action = (args[1] || "").toLowerCase()
 
-      const permitted_professions = ["lenhador", "estoquista"]
+      const permitted_professions = ["lenhador", "estoquista", "crafter"]
 
       if (!permitted_professions.includes(professionName)) return
       if (!bot.professions) return

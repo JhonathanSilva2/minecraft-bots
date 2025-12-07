@@ -1,0 +1,34 @@
+// ARQUIVO: commands/craftTiers.js
+
+export const CRAFT_TIERS = {
+  // Ferramentas
+  'pickaxe': ['diamond_pickaxe', 'iron_pickaxe', 'golden_pickaxe', 'stone_pickaxe', 'wooden_pickaxe'],
+  'picareta': ['diamond_pickaxe', 'iron_pickaxe', 'golden_pickaxe', 'stone_pickaxe', 'wooden_pickaxe'],
+  
+  'axe': ['diamond_axe', 'iron_axe', 'golden_axe', 'stone_axe', 'wooden_axe'],
+  'machado': ['diamond_axe', 'iron_axe', 'golden_axe', 'stone_axe', 'wooden_axe'],
+  
+  'sword': ['diamond_sword', 'iron_sword', 'golden_sword', 'stone_sword', 'wooden_sword'],
+  'espada': ['diamond_sword', 'iron_sword', 'golden_sword', 'stone_sword', 'wooden_sword'],
+  
+  'shovel': ['diamond_shovel', 'iron_shovel', 'golden_shovel', 'stone_shovel', 'wooden_shovel'],
+  'pá': ['diamond_shovel', 'iron_shovel', 'golden_shovel', 'stone_shovel', 'wooden_shovel'],
+  'pa': ['diamond_shovel', 'iron_shovel', 'golden_shovel', 'stone_shovel', 'wooden_shovel'],
+  
+  'hoe': ['diamond_hoe', 'iron_hoe', 'golden_hoe', 'stone_hoe', 'wooden_hoe'],
+  'enxada': ['diamond_hoe', 'iron_hoe', 'golden_hoe', 'stone_hoe', 'wooden_hoe'],
+
+  // Armaduras
+  'helmet': ['diamond_helmet', 'iron_helmet', 'golden_helmet', 'leather_helmet'],
+  'capacete': ['diamond_helmet', 'iron_helmet', 'golden_helmet', 'leather_helmet'],
+  
+  'chestplate': ['diamond_chestplate', 'iron_chestplate', 'golden_chestplate', 'leather_chestplate'],
+  'peitoral': ['diamond_chestplate', 'iron_chestplate', 'golden_chestplate', 'leather_chestplate'],
+  
+  'leggings': ['diamond_leggings', 'iron_leggings', 'golden_leggings', 'leather_leggings'],
+  'calça': ['diamond_leggings', 'iron_leggings', 'golden_leggings', 'leather_leggings'],
+  'calca': ['diamond_leggings', 'iron_leggings', 'golden_leggings', 'leather_leggings'],
+  
+  'boots': ['diamond_boots', 'iron_boots', 'golden_boots', 'leather_boots'],
+  'botas': ['diamond_boots', 'iron_boots', 'golden_boots', 'leather_boots']
+}

@@ -3,13 +3,17 @@ import { Vec3 } from "vec3"
 
 const { goals } = pf
 const { Movements } = pf
-const { GoalBlock } = goals
+const { GoalBlock, GoalNear } = goals
 
 class MovementManager {
   constructor(bot, logger) {
     this.bot = bot
     this.logger = logger
   }
+
+  // ======================================================
+  // NAVEGAÇÃO BÁSICA
+  // ======================================================
 
   async gotoLocation(name) {
     const bot = this.bot
@@ -29,7 +33,7 @@ class MovementManager {
         return
       }
 
-      const movements = this.createSmartMovement(bot, logger)
+      const movements = this.createSmartMovement(bot)
       bot.pathfinder.setMovements(movements)
 
       const goal = new GoalBlock(location.x, location.y, location.z)
@@ -54,6 +58,10 @@ class MovementManager {
     movements.allowFreeMotion = true
     movements.allowSprinting = true
 
+    // Configurações extras para evitar que ele quebre baús ou crafting tables
+    // movements.blocksToAvoid.add(bot.registry.blocksByName['chest'].id) 
+    // movements.blocksToAvoid.add(bot.registry.blocksByName['crafting_table'].id)
+
     bot.pathfinder.setMovements(movements)
     this.setupSimpleAntiStuck(bot)
 
@@ -64,6 +72,9 @@ class MovementManager {
     let lastPos = bot.entity.position.clone()
     let lastMove = Date.now()
     let attempts = 0
+
+    // Remove listeners antigos para evitar duplicidade se chamar createSmartMovement 2x
+    bot.removeAllListeners('physicsTick')
 
     bot.on("physicsTick", async () => {
       const current = bot.entity.position
@@ -114,74 +125,156 @@ class MovementManager {
     bot.setControlState("jump", false)
   }
 
+  // ======================================================
+  // SISTEMA DE LOGÍSTICA (BAÚS)
+  // ======================================================
+
+  /**
+   * Guarda itens em uma zona específica.
+   * @param {string} zoneName - Nome do local no locations.json
+   * @param {function} itemFilter - Função (item) => boolean para decidir o que guardar
+   */
   async storeItemsInZone(zoneName, itemFilter) {
     const bot = this.bot
     const logger = this.logger
 
-    // 1. carregar zona
     const zone = await bot.locations.get(zoneName)
     if (!zone) {
       logger?.(`[storage] zona '${zoneName}' não encontrada`)
       return false
     }
 
-    // 2. AQUI: USANDO O MÉTODO findChestsInZone COMO VOCÊ PEDIU
     const chests = this.findChestsInZone(zone)
     if (!chests.length) {
       logger?.(`[storage] nenhum baú encontrado na zona '${zoneName}'`)
       return false
     }
 
-    // 3. baú mais próximo
-    const chestBlock = chests[0]
+    // Tenta guardar nos baús, um por um, até esvaziar o inventário
+    for (const chestBlock of chests) {
+        // Verifica se ainda temos itens para guardar antes de ir ao próximo baú
+        const itemsToDeposit = bot.inventory.items().filter(itemFilter)
+        if (itemsToDeposit.length === 0) break
 
-    // 4. mover até o baú
-    try {
-      await bot.pathfinder.goto(
-        new goals.GoalNear(
-          chestBlock.position.x,
-          chestBlock.position.y,
-          chestBlock.position.z,
-          1
-        )
-      )
-    } catch (err) {
-      logger?.(`[storage] não consegui chegar no baú: ${err.message}`)
-      return false
+        try {
+            await this.goToBlock(chestBlock)
+            const chest = await bot.openChest(chestBlock)
+            
+            for (const item of itemsToDeposit) {
+                try {
+                    await chest.deposit(item.type, null, item.count)
+                } catch (err) {
+                    // Baú cheio ou erro específico, continua para o próximo item/baú
+                }
+            }
+            chest.close()
+        } catch (err) {
+            logger?.(`[storage] Erro ao acessar baú: ${err.message}`)
+        }
     }
 
-    // 5. abrir o baú
-    let chest
-    try {
-      chest = await bot.openChest(chestBlock)
-    } catch (err) {
-      logger?.(`[storage] não consegui abrir o baú: ${err.message}`)
-      return false
+    const remaining = bot.inventory.items().filter(itemFilter)
+    if (remaining.length > 0) {
+        logger?.(`[storage] Aviso: Não coube tudo nos baús. Restam ${remaining.length} stacks.`)
+        return false
     }
-
-    // 6. filtrar itens
-    const items = bot.inventory.items().filter(itemFilter)
-    if (!items.length) {
-      chest.close()
-      return true
-    }
-
-    // 7. depositar
-    for (const item of items) {
-      try {
-        await chest.deposit(item.type, null, item.count)
-      } catch (err) {
-        logger?.(`[storage] erro ao depositar ${item.name}: ${err.message}`)
-      }
-    }
-
-    chest.close()
-    logger?.(`[storage] itens armazenados com sucesso em '${zoneName}'`)
-
+    
+    logger?.(`[storage] Itens armazenados com sucesso em '${zoneName}'`)
     return true
   }
 
-  // Converte a zona (x, y, z, width, depth) em uma lista de blocos de baú
+  /**
+   * Busca itens em uma zona baseada em requisitos do CraftManager.
+   * @param {string} zoneName - Nome da zona
+   * @param {Array} requirements - [{ ids: [1, 2], count: 10 }, ...]
+   */
+  async retrieveItemsFromZone(zoneName, requirements) {
+      const bot = this.bot
+      const logger = this.logger
+
+      // 1. Prepara controle de faltantes (Deep Copy para não alterar o original da referência)
+      // O objetivo é zerar os 'count' dessa lista
+      const missing = JSON.parse(JSON.stringify(requirements))
+
+      const zone = await bot.locations.get(zoneName)
+      if (!zone) {
+          logger?.(`[logistics] Zona '${zoneName}' não encontrada.`)
+          return false
+      }
+
+      const chests = this.findChestsInZone(zone)
+      if (!chests.length) {
+          logger?.(`[logistics] Nenhum baú em '${zoneName}'.`)
+          return false
+      }
+
+      logger?.(`[logistics] Procurando recursos em ${chests.length} baús...`)
+
+      for (const chestBlock of chests) {
+          // Se já pegamos tudo, para de abrir baús
+          if (missing.length === 0) break
+
+          try {
+              await this.goToBlock(chestBlock)
+              const window = await bot.openContainer(chestBlock)
+              const containerItems = window.containerItems()
+
+              // Itera sobre os requisitos que ainda faltam
+              for (let i = 0; i < missing.length; i++) {
+                  const req = missing[i]
+                  
+                  // Procura no baú um item que bata com um dos IDs necessários
+                  const itemInChest = containerItems.find(item => req.ids.includes(item.type))
+
+                  if (itemInChest) {
+                      const qtyToWithdraw = Math.min(itemInChest.count, req.count)
+                      
+                      try {
+                          await window.withdraw(itemInChest.type, null, qtyToWithdraw)
+                          
+                          // Atualiza quanto falta
+                          req.count -= qtyToWithdraw
+                          logger?.(`[logistics] Peguei ${qtyToWithdraw}x (ID: ${itemInChest.type}). Falta: ${req.count}`)
+                      } catch (err) {
+                          logger?.(`[logistics] Falha ao sacar item: ${err.message}`)
+                      }
+                  }
+              }
+
+              window.close()
+              
+              // Remove requisitos cumpridos (count <= 0) da lista 'missing'
+              // Filtramos o array in-place ou reatribuimos
+              const pending = missing.filter(req => req.count > 0)
+              missing.length = 0
+              missing.push(...pending)
+
+          } catch (err) {
+              logger?.(`[logistics] Erro ao abrir baú: ${err.message}`)
+          }
+      }
+
+      if (missing.length > 0) {
+          logger?.(`[logistics] Não encontrei todos os itens. Faltam requisitos.`)
+          return false
+      }
+
+      logger?.(`[logistics] Todos os recursos coletados com sucesso!`)
+      return true
+  }
+
+  // ======================================================
+  // UTILITÁRIOS
+  // ======================================================
+
+  // Helper para ir até um bloco (baú, mesa, etc)
+  async goToBlock(block) {
+      // 1.41 é raiz de 2 (diagonal), bom alcance
+      await this.bot.pathfinder.goto(
+          new GoalNear(block.position.x, block.position.y, block.position.z, 1.5)
+      )
+  }
+
   findChestsInZone(loc) {
     const bot = this.bot
 

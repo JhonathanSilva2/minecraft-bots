@@ -10,6 +10,7 @@ import { createProfessionManager } from "../professions/manager.js"
 import { writeFileSync } from "fs"
 import MovementManager from "../modules/movement/MovementManager.js"
 import LocationManager from "../modules/location/LocationManager.js"
+import CraftManager from "../modules/craft/CraftManager.js" 
 
 import "dotenv/config"
 
@@ -34,6 +35,7 @@ export function startBot(name = "Max", options = {}) {
 
   bot.movement = new MovementManager(bot)
   bot.locations = new LocationManager(bot, logger)
+  bot.crafting = new CraftManager(bot, logger)
   
 
   // Registrar módulos no bot (injeção de dependências)
@@ -47,6 +49,7 @@ export function startBot(name = "Max", options = {}) {
     logger("online e inicializando módulos...")
     bot.chat(`${bot.username} online e inicializando módulos...`)
     bot.mcData = mcDataLoader(bot.version)
+    bot.crafting.init()
     console.log("Bot MC version:", bot.version)
     console.log("Loaded mcData version:", bot.mcData?.version)
     console.log("Total recipes:", bot.mcData?.recipes?.length)
