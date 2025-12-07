@@ -2,7 +2,6 @@ import pathfinder from "mineflayer-pathfinder"
 const { goals } = pathfinder
 const { Movements } = pathfinder
 
-// Estados do Robô
 const STATE = {
   IDLE: 'idle',
   TRAVELING_TO_MINE: 'traveling_to_mine',
@@ -14,64 +13,72 @@ const STATE = {
 
 export function createMiner(bot, logger) {
   const manager = bot.mining
-  const logistics = bot.logistics // Usando o novo LogisticsManager
+  const logistics = bot.logistics
   
-  if (!manager) throw new Error("MinerManager (bot.mining) não carregado!")
-  if (!logistics) throw new Error("LogisticsManager (bot.logistics) não carregado!")
+  if (!manager) throw new Error("MinerManager ausente!")
+  if (!logistics) throw new Error("LogisticsManager ausente!")
   
+  // Variáveis de Estado
   let enabled = false
   let currentState = STATE.IDLE
   let hasRequestedCraft = false 
-  let miningStuckCounter = 0 // Contador para detectar se travou minerando
+  let miningStuckCounter = 0
+  
+  // MEMÓRIA: Guarda onde parou para não recomeçar do zero
+  let lastMiningPos = null 
 
-  // Configurações
   const CONFIG = {
     baseLocation: null,
     mineStartLocation: null,
     direction: 'north',
-    stoneLimit: 256,         // 4 Packs
+    stoneLimit: 256,
     checkChestInterval: 10000 
   }
 
-  // --- MENSAGENS DIVERTIDAS ---
-  const say = (msg) => bot.chat(msg)
+  // --- MENSAGENS ---
   const phrases = {
     start: ["Bora trabalhar!", "Hora de cavar buraco.", "Picareta na mão, partiu!"],
-    full: ["Mochila pesada! Voltando.", "Não cabe mais nada, indo descarregar.", "Estoque cheio!"],
-    broken: ["Quebrou minha picareta...", "Ferramenta pifou. Preciso de outra.", "Ops, picareta foi pro espaço."],
+    full: ["Mochila pesada! Voltando.", "Não cabe mais nada.", "Estoque cheio!"],
+    broken: ["Quebrou minha picareta...", "Ferramenta pifou.", "Preciso de outra picareta."],
     back: ["De volta à mina.", "Lá vamos nós de novo.", "Descendo!"],
-    stuck: ["Acho que estou preso...", "Lugar apertado hein."]
+    stuck: ["Acho que estou preso...", "Lugar apertado hein."],
+    resume: ["Voltando para onde parei...", "Descendo até a última escavação."]
   }
   
-  function randomSay(category) {
-    const list = phrases[category]
+  const randomSay = (cat) => {
+    const list = phrases[cat]
     if (list) bot.chat(list[Math.floor(Math.random() * list.length)])
   }
 
   // --- CONTROLE ---
-
   function setEnabled(value) {
     enabled = value
     
     if (value) {
       if (!CONFIG.baseLocation) CONFIG.baseLocation = bot.entity.position.clone()
+      
+      // Define local de início apenas se não existir
       if (!CONFIG.mineStartLocation) {
-        // Define inicio 30 blocos a frente da base se não definido
-        CONFIG.mineStartLocation = CONFIG.baseLocation.offset(
-            CONFIG.direction === 'north' ? 0 : 0, 
-            0, 
-            CONFIG.direction === 'north' ? -30 : 30 
-            // (Simplificado, o ideal é calcular vetor)
-        )
+        // Cálculo vetorial básico para frente (30 blocos)
+        const offset = { x: 0, z: 0 }
+        if (CONFIG.direction === 'north') offset.z = -30
+        if (CONFIG.direction === 'south') offset.z = 30
+        if (CONFIG.direction === 'east') offset.x = 30
+        if (CONFIG.direction === 'west') offset.x = -30
+        
+        CONFIG.mineStartLocation = CONFIG.baseLocation.offset(offset.x, 0, offset.z)
       }
       
-      randomSay('start')
+      // Se tivermos uma posição salva de antes, avisa
+      if (lastMiningPos) randomSay('resume')
+      else randomSay('start')
+
       currentState = STATE.TRAVELING_TO_MINE
       hasRequestedCraft = false 
       miningStuckCounter = 0
-      gameLoop() // Inicia o loop
+      gameLoop() 
     } else {
-      bot.chat("Minerador parando. Fim do expediente.")
+      bot.chat("Minerador parando.")
       currentState = STATE.IDLE
       bot.pathfinder.stop()
     }
@@ -81,10 +88,12 @@ export function createMiner(bot, logger) {
     if (basePos) CONFIG.baseLocation = basePos
     if (minePos) CONFIG.mineStartLocation = minePos
     if (dir) CONFIG.direction = dir
+    // Se mudar a configuração, reseta a memória de onde parou
+    lastMiningPos = null 
   }
 
   // ==========================================
-  // LOOP PRINCIPAL (Sincronizado com Ticks)
+  // GAME LOOP
   // ==========================================
   async function gameLoop() {
     while (enabled) {
@@ -97,36 +106,39 @@ export function createMiner(bot, logger) {
           case STATE.WAITING_FOR_TOOL: await handleWaitingForTool(); break;
         }
       } catch (err) {
-        logger?.(`[Miner] Erro no loop: ${err.message}`)
-        await bot.waitForTicks(20) // Espera 1s em caso de erro
+        logger?.(`[Miner] Erro: ${err.message}`)
+        await bot.waitForTicks(20)
       }
-      
-      // Delay pequeno entre ciclos para não fritar a CPU e parecer natural
-      await bot.waitForTicks(10) // 0.5 segundos
+      await bot.waitForTicks(10)
     }
   }
 
-  // --- LÓGICAS DOS ESTADOS ---
+  // --- ESTADOS ---
 
   async function handleTravelToMine() {
-    // Configura movimento padrão para andar na superfície
     const move = new Movements(bot)
-    move.canDig = false // Não sai quebrando tudo no caminho
+    move.canDig = false 
     move.allowParkour = true
     bot.pathfinder.setMovements(move)
 
-    if (bot.entity.position.distanceTo(CONFIG.mineStartLocation) > 3) {
-      // logger?.("[Miner] Indo para o ponto inicial da mina...")
-      await bot.pathfinder.goto(new goals.GoalNear(CONFIG.mineStartLocation.x, CONFIG.mineStartLocation.y, CONFIG.mineStartLocation.z, 1.5))
+    // LÓGICA DE RETOMADA: Se já cavamos antes, volte para lá. Se não, vá para o início.
+    const target = lastMiningPos || CONFIG.mineStartLocation
+    
+    // Só anda se estiver longe (> 2 blocos)
+    if (bot.entity.position.distanceTo(target) > 2) {
+      // logger?.(`[Miner] Indo para ${lastMiningPos ? 'fundo da mina' : 'início da mina'}...`)
+      await bot.pathfinder.goto(new goals.GoalNear(target.x, target.y, target.z, 1.5))
     }
     
-    // Chegamos
     currentState = STATE.MINING
   }
 
   async function handleMining() {
-    // 1. Verificações de Parada
-    const stoneCount = manager.countItem('cobblestone') + manager.countItem('stone') + manager.countItem('deepslate') + manager.countItem('diorite')
+    // 1. Atualiza onde estamos (para poder voltar depois)
+    lastMiningPos = bot.entity.position.clone()
+
+    // 2. Checagens
+    const stoneCount = manager.countItem('cobblestone') + manager.countItem('stone') + manager.countItem('deepslate')
     const hasPick = manager.hasPickaxe()
 
     if (!hasPick) {
@@ -142,87 +154,66 @@ export function createMiner(bot, logger) {
     }
 
     if (bot.entity.position.y <= -58) {
-      bot.chat("Cheguei no fundo do mundo (Bedrock). Voltando.")
+      bot.chat("Camada limite atingida! Voltando.")
       currentState = STATE.RETURNING_BASE
+      // Resetar lastMiningPos aqui? Depende se você quer que ele pare ou tente outro lugar.
       return
     }
 
-    // 2. Tenta cavar
+    // 3. Ação: Cavar Degrau
     const prevPos = bot.entity.position.clone()
-    
-    // Chama o manager para cavar o degrau
     const success = await manager.digStaircaseStep(CONFIG.direction)
     
-    // 3. Detecção de Travamento (Anti-Stuck)
+    // 4. Anti-Stuck
     if (!success) {
         miningStuckCounter++
-        logger?.(`[Miner] Falha ao cavar. Tentativa ${miningStuckCounter}`)
-        
         if (miningStuckCounter > 3) {
             randomSay('stuck')
-            // Tenta pular e se mexer
             bot.setControlState('jump', true)
-            await bot.waitForTicks(10)
+            await bot.waitForTicks(15)
             bot.setControlState('jump', false)
-            // Tenta andar um pouco para trás
-            // ... (Lógica de destravamento simples)
             miningStuckCounter = 0
         }
     } else {
-        // Verifica se realmente se mexeu
-        if (bot.entity.position.distanceTo(prevPos) < 0.1) {
-             // Cavou mas não andou?
-        } else {
-            miningStuckCounter = 0
-        }
+        // Se cavou com sucesso, reseta contador
+        miningStuckCounter = 0
     }
   }
 
   async function handleReturnBase() {
-    logger?.("[Miner] Subindo de volta para a base...")
-    
-    // === O SEGREDO DO RETORNO SEGURO ===
-    // Criamos uma configuração de movimento específica para SUBIR escadas
+    // logger?.("[Miner] Voltando para base...")
     const returnMove = new Movements(bot)
-    
-    returnMove.canDig = false      // PROIBIDO quebrar blocos na volta (evita quebrar a escada)
-    returnMove.allowParkour = true // PERMITIDO pular (para subir os degraus)
+    returnMove.canDig = false       // CRUCIAL: Não quebrar a escada na volta
+    returnMove.allowParkour = true
     returnMove.allowSprinting = true
-    returnMove.canPlaceOn = false  // Não colocar blocos para não bloquear o caminho
-    
+    returnMove.canPlaceOn = false   
     bot.pathfinder.setMovements(returnMove)
 
     try {
         await bot.pathfinder.goto(new goals.GoalNear(CONFIG.baseLocation.x, CONFIG.baseLocation.y, CONFIG.baseLocation.z, 1.5))
         currentState = STATE.DEPOSITING
     } catch (e) {
-        bot.chat("Não consigo achar o caminho de volta! Estou preso ou a escada foi bloqueada.")
-        // Em um bot avançado, aqui ativaríamos um modo "Rescue" para cavar para cima
-        // Por enquanto, apenas para para não bugar
+        bot.chat("Erro ao voltar pra casa. Caminho bloqueado?")
         setEnabled(false)
     }
   }
 
   async function handleDepositing() {
-    logger?.("[Miner] Guardando itens...")
+    // logger?.("[Miner] Depositando...")
     
-    // Filtro do que fica no inventário
     const itemsToKeep = (item) => {
         return item.name.includes('pickaxe') || 
                item.name.includes('sword') || 
                item.name.includes('torch') ||
                item.name.includes('bread') || 
-               item.name.includes('steak') ||
+               item.name.includes('cooked_beef') || // Correção do nome do steak
                item.name.includes('helmet') ||
                item.name.includes('chestplate') ||
                item.name.includes('leggings') ||
                item.name.includes('boots')
     }
 
-    // Usa o novo LogisticsManager (inverte a lógica: keep vs deposit)
-    // O Logistics espera uma função filter que retorna TRUE para o que DEVE ser depositado
     const depositFilter = (item) => !itemsToKeep(item)
-
     await logistics.storeItemsInZone("estoque", depositFilter)
     
     if (!manager.hasPickaxe()) {
@@ -234,35 +225,43 @@ export function createMiner(bot, logger) {
   }
 
   async function handleWaitingForTool() {
-    logger?.("[Miner] Procurando picareta...")
+    // CORREÇÃO: Verifica ferramenta por prioridade, UM POR VEZ
+    const pickaxeTiers = ['diamond_pickaxe', 'iron_pickaxe', 'stone_pickaxe', 'golden_pickaxe']
+    
+    let gotTool = false
 
-    // Prioridade de ferramentas
-    const tools = [
-        { ids: [bot.registry.itemsByName.diamond_pickaxe.id], count: 1 },
-        { ids: [bot.registry.itemsByName.iron_pickaxe.id], count: 1 },
-        { ids: [bot.registry.itemsByName.stone_pickaxe.id], count: 1 },
+    // Tenta pegar a melhor disponível
+    for (const pickName of pickaxeTiers) {
+        const itemData = bot.registry.itemsByName[pickName]
+        if (!itemData) continue
+
+        // Pede para o Logistic pegar APENAS esse tipo
+        const req = [{ ids: [itemData.id], count: 1 }]
         
-    ]
+        // Retrieve retorna true se conseguiu pegar tudo que foi pedido
+        const success = await logistics.retrieveItemsFromZone("estoque", req)
+        
+        if (success) {
+            gotTool = true
+            break // Já pegou uma, para de procurar
+        }
+    }
 
-    // Tenta pegar do estoque
-    await logistics.retrieveItemsFromZone("estoque", tools)
-
-    if (manager.hasPickaxe()) {
-        bot.chat("Achei uma picareta! Voltando ao trabalho.")
+    if (gotTool || manager.hasPickaxe()) {
+        bot.chat("Consegui uma picareta!")
         hasRequestedCraft = false 
         currentState = STATE.TRAVELING_TO_MINE
         return
     }
 
-    // Se não achou, pede ajuda
+    // Se não achou NENHUMA
     if (!hasRequestedCraft) {
         bot.chat("!jebona craftar picareta") 
-        bot.chat("Estou sem ferramenta. Alguém faz uma pra mim?")
+        bot.chat("Sem picaretas no estoque. Alguém ajuda?")
         hasRequestedCraft = true 
     }
 
-    // Espera inteligente usando ticks
-    await bot.waitForTicks(200) // Espera 10 segundos (20 ticks * 10)
+    await bot.waitForTicks(100) // 5 segundos
   }
 
   return { setEnabled, setConfig }

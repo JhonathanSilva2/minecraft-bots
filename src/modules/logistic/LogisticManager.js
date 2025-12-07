@@ -149,28 +149,52 @@ export default class LogisticsManager {
 
   findChestsInZone(loc) {
     const bot = this.bot
-    const minX = loc.x, maxX = loc.x + (loc.width || 1)
-    const minZ = loc.z, maxZ = loc.z + (loc.depth || 1)
-    const minY = loc.y - 1, maxY = loc.y + 2
+    
+    // Calcula Bounding Box (Caixa de Colisão)
+    // Usamos Math.floor/ceil para garantir que pegamos o bloco inteiro
+    const minX = Math.floor(loc.x)
+    const maxX = Math.floor(loc.x + (loc.width || 1))
+    const minZ = Math.floor(loc.z)
+    const maxZ = Math.floor(loc.z + (loc.depth || 1))
+    const minY = Math.floor(loc.y - 1)
+    const maxY = Math.floor(loc.y + 2)
 
-    const allChests = bot.findBlocks({
-      matching: [
-        bot.registry.blocksByName["chest"]?.id,
-        bot.registry.blocksByName["barrel"]?.id,
-        bot.registry.blocksByName["trapped_chest"]?.id,
-      ].filter(Boolean),
-      maxDistance: 64,
-      count: 200,
+    // LOG DE DEBUG (Remova depois que funcionar)
+    this.logger?.(`[Debug] Buscando baús na área: X[${minX} a ${maxX}] Y[${minY} a ${maxY}] Z[${minZ} a ${maxZ}]`)
+
+    // IDs de contêineres válidos
+    const chestIds = [
+      bot.registry.blocksByName["chest"]?.id,
+      bot.registry.blocksByName["barrel"]?.id,
+      bot.registry.blocksByName["trapped_chest"]?.id,
+    ].filter(Boolean)
+
+    // Busca TODOS os baús num raio de 32 blocos (reduzi de 64 pra economizar CPU)
+    const allChestsPositions = bot.findBlocks({
+      matching: chestIds,
+      maxDistance: 32,
+      count: 50, // Limite para não processar baús demais
     })
 
-    return allChests
+    // Filtra apenas os que estão DENTRO da zona
+    const chestsInZone = allChestsPositions.filter(pos => {
+        // Verifica se a posição do bloco está dentro dos limites
+        const insideX = pos.x >= minX && pos.x < maxX // Usei < maxX para comportamento padrão de largura
+        const insideY = pos.y >= minY && pos.y <= maxY
+        const insideZ = pos.z >= minZ && pos.z < maxZ 
+
+        if (!insideX || !insideZ || !insideY) {
+            // Se estiver muito perto, avisa no log para ajustarmos o JSON
+           // const dist = bot.entity.position.distanceTo(pos)
+           // if (dist < 5) this.logger?.(`[Debug] Baú ignorado em (${pos.x}, ${pos.y}, ${pos.z}). Fora da zona!`)
+            return false
+        }
+        return true
+    })
+
+    // Ordena pelo mais próximo
+    return chestsInZone
       .map(pos => bot.blockAt(pos))
-      .filter(block => {
-        const p = block.position
-        return p.x >= minX && p.x <= maxX &&
-               p.z >= minZ && p.z <= maxZ &&
-               p.y >= minY && p.y <= maxY
-      })
       .sort((a, b) => bot.entity.position.distanceTo(a.position) - bot.entity.position.distanceTo(b.position))
   }
 }
