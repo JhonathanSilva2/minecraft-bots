@@ -45,6 +45,11 @@ export function createWoodcutter(bot, logger) {
   // ---------------------------------------
   // CICLO PRINCIPAL
   // ---------------------------------------
+  // ... (código anterior)
+
+  // ---------------------------------------
+  // CICLO PRINCIPAL
+  // ---------------------------------------
   async function runCycle() {
     if (!enabled) return
 
@@ -63,24 +68,29 @@ export function createWoodcutter(bot, logger) {
       // --------------------------
       // 1) 15+ MADEIRAS → ARMAZENA NA BASE
       // --------------------------
-      if (wood >= 15) {
-        logger?.("[lenhador] 15+ madeiras — armazenando na base...")
+      // Note: Se wood >= 64, ele armazena E DEPOIS checa por machado.
+      if (wood >= 64) {
+        logger?.("[lenhador] +1 Pack coletado — armazenando na base...")
         await storeInArea(bot, logger, base)
-        await checkForAxe(bot, logger, armazem) // Checa machado após guardar
+
+        // Depois de guardar, checa se ainda tem machado (pode ter guardado um machado velho)
+        await checkForAxe(bot, logger, armazem)
         return
       }
 
       // --------------------------
       // 2) PRECISA DE MACHADO?
       // --------------------------
-      const hasAxe = bot.inventory.items().some((i) => i.name.includes("_axe"))
+      let hasAxe = bot.inventory.items().some((i) => i.name.includes("_axe"))
       let attemptedAxeSearch = false
 
       if (!hasAxe) {
         logger?.("[lenhador] sem machado — procurando no armazém...")
         attemptedAxeSearch = true
 
+        // *** AQUI O BOT SE MOVE PARA O ARMAZÉM SOMENTE SE NECESSÁRIO ***
         const got = await checkForAxe(bot, logger, armazem)
+        hasAxe = got // Atualiza o status do machado
 
         if (!got) {
           // Se não encontrou machado, ele avisa, mas não dá 'return'.
@@ -88,7 +98,7 @@ export function createWoodcutter(bot, logger) {
           logger?.(
             "[lenhador] nenhum machado encontrado — cortando com a mão..."
           )
-          // O bot não espera aqui, ele segue para o corte (Etapa 3)
+          // O bot segue para o corte (Etapa 3)
         }
       }
 
@@ -116,12 +126,58 @@ export function createWoodcutter(bot, logger) {
     }
   }
 
-  // Lenhador:checkForAxe (ATUALIZADO)
+  // ---------------------------------------
+  // ARMAZENAR ITENS (MADEIRA)
+  // ---------------------------------------
+  async function storeInArea(bot, logger, area) {
+    // *** REMOVIDA A CHAMADA PROBLEMÁTICA: await bot.movement.gotoLocation("base") ***
+    try {
+      await bot.pathfinder.goto(
+        new goals.GoalNear(
+          area.x + area.width / 2, // Centro X
+          area.y, // Nível Y
+          area.z + area.depth / 2, // Centro Z
+          4 // Distância de 4 blocos do centro
+        )
+      )
+    } catch (e) {
+      logger?.(`[lenhador] Erro ao mover para a Base: ${e.message}`)
+      return false
+    }
+    const chests = findChestsInArea(area)
+    if (!chests.length) {
+      logger?.("[lenhador] Nenhum baú encontrado!")
+      return false
+    }
+
+    const chest = chests[0]
+
+    // O movimento para o baú é feito aqui, e é aguardado ('await').
+    await moveTo(bot, chest.position)
+
+    const win = await bot.openContainer(chest)
+    const isAxe = (item) => item.name.includes("_axe")
+    try {
+      for (const item of bot.inventory.items()) {
+        if (!isAxe(item)) {
+          await win.deposit(item.type, item.metadata, item.count)
+        }
+      }
+    } finally {
+      win.close()
+    }
+
+    return true
+  }
+
   // ---------------------------------------
   // PROCURAR MACHADO
   // ---------------------------------------
   async function checkForAxe(bot, logger, area) {
     // Lista de machados por prioridade (do melhor para o pior)
+    // checar se tem machado no inventário
+    let hasAxe = bot.inventory.items().some((i) => i.name.includes("_axe"))
+    if (hasAxe) return true
     const list = ["diamond_axe", "iron_axe", "stone_axe", "wooden_axe"]
 
     for (const axe of list) {
@@ -149,29 +205,6 @@ export function createWoodcutter(bot, logger) {
     }
     return false
   }
-
-  async function storeInArea(bot, logger, area) {
-    // CORREÇÃO 1: findChestsInArea é síncrona, REMOVER 'await'
-    const chests = findChestsInArea(area)
-    if (!chests.length) {
-      logger?.("[lenhador] Nenhum baú encontrado!")
-      return false
-    }
-
-    const chest = chests[0]
-    await moveTo(bot, chest.position)
-
-    const win = await bot.openContainer(chest)
-    try {
-      for (const item of bot.inventory.items()) {
-        await win.deposit(item.type, item.metadata, item.count)
-      }
-    } finally {
-      win.close()
-    }
-
-    return true
-  } // --------------------------------------- // PROCURAR ITEM NA ÁREA // ---------------------------------------
 
   async function findItemInArea(bot, logger, area, itemName) {
     // CORREÇÃO 1: findChestsInArea é síncrona, SEM 'await'
@@ -270,7 +303,7 @@ export function createWoodcutter(bot, logger) {
 
     const found = bot.findBlocks({
       matching: ids,
-      maxDistance: 40,
+      maxDistance: 100,
       count: 60,
     })
 
