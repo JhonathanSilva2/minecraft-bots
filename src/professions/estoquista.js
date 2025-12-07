@@ -3,6 +3,9 @@ const { Movements, goals } = pf
 const { GoalNear } = goals
 import { Vec3 } from "vec3"
 
+// IMPORTAÇÃO DOS GRUPOS
+import { ITEM_GROUPS } from "./craft/craftTiers.js"
+
 // Lista de itens prioritários (materiais de construção e drops comuns)
 // Estes itens serão depositados primeiro quando buscarmos um baú vazio.
 const PRIORITY_ITEMS = [
@@ -31,6 +34,22 @@ const PRIORITY_ITEMS = [
   "spider_eye",
   "gunpowder",
 ]
+
+// Função auxiliar para descobrir a categoria (AGORA USA O IMPORT)
+function getItemCategory(itemName) {
+  for (const [category, patterns] of Object.entries(ITEM_GROUPS)) {
+    // Verifica se:
+    // 1. O nome é EXATAMENTE igual ao padrão (ex: "stone")
+    // 2. O padrão é um sufixo/prefixo (tem "_" e o nome inclui). Ex: "_log" bate com "oak_log"
+    if (patterns.some(p => {
+        if (p.includes('_')) return itemName.includes(p)
+        return itemName.includes(p) // Simplificação: se contém a palavra (ex: "sand" em "sandstone" - cuidado, mas útil)
+    })) {
+      return category
+    }
+  }
+  return 'outros'
+}
 
 export function createEstoquista(bot, logger) {
   let enabled = false
@@ -171,34 +190,40 @@ export function createEstoquista(bot, logger) {
   async function routineDistributeToStock(stockLoc, returnLoc) {
     await moveTo(stockLoc)
     const chests = findChestsInZone(stockLoc)
+    const emptyChests = []
 
-    // FASE 1: Agrupamento (Smart Stacking)
-    // Procura baús que JÁ tenham o item para completar os packs
+    // FASE 1: Baús já ocupados (Respeitar categoria)
     for (const chestBlock of chests) {
-      if (!enabled || bot.inventory.items().length === 0) return
-
-      // Só abre se tivermos itens compatíveis? (Difícil saber sem abrir, então abrimos todos por enquanto)
-      // Otimização futura: Cache de memória do conteúdo dos baús.
+      if (!enabled || bot.inventory.items().length === 0) break
 
       await moveTo(chestBlock.position)
       const window = await bot.openContainer(chestBlock)
 
       try {
         const chestItems = window.containerItems()
-        const botItems = bot.inventory.items()
+        
+        if (chestItems.length === 0) {
+          emptyChests.push(chestBlock)
+          continue
+        }
 
+        // Identifica categoria do baú
+        const sampleItem = chestItems[0]
+        const chestCategory = getItemCategory(sampleItem.name)
+        
+        // logger?.(`[estoque] Baú ${chestCategory.toUpperCase()}`)
+
+        const botItems = bot.inventory.items()
+        
         for (const item of botItems) {
-          // Verifica se o baú tem o mesmo item E espaço no stack
-          const match = chestItems.find(
-            (i) => i.type === item.type && i.count < i.stackSize
-          )
-          if (match) {
+          const itemCategory = getItemCategory(item.name)
+          const isSameItem = chestItems.some(i => i.type === item.type)
+          
+          // Se for da mesma categoria ou for o mesmo item, guarda
+          if (isSameItem || (itemCategory === chestCategory && itemCategory !== 'outros')) {
             try {
               await window.deposit(item.type, item.metadata, item.count)
-              logger?.(`[estoque] Agrupando ${item.name}...`)
-            } catch (e) {
-              /* Ignora erro se encher */
-            }
+            } catch (e) {}
           }
         }
       } finally {
@@ -206,53 +231,52 @@ export function createEstoquista(bot, logger) {
       }
     }
 
-    // FASE 2: Preencher Baús Vazios (Prioridades Primeiro)
-    const remainingItems = bot.inventory.items()
-    if (remainingItems.length > 0) {
-      logger?.("[estoque] Itens restantes. Procurando espaço vazio...")
+    // FASE 2: Baús Vazios (Prioridades Primeiro)
+    if (bot.inventory.items().length > 0 && emptyChests.length > 0) {
+        logger?.("[estoque] Usando baús vazios...")
 
-      // Ordena o inventário para depositar PRIORIDADES primeiro
-      remainingItems.sort((a, b) => {
-        const aPrio = PRIORITY_ITEMS.includes(a.name) ? 1 : 0
-        const bPrio = PRIORITY_ITEMS.includes(b.name) ? 1 : 0
-        return bPrio - aPrio // Maior prioridade primeiro
-      })
+        // Tenta agrupar itens do inventário por categoria antes de colocar
+        // (Isso é uma melhoria simples: se tenho 3 tipos de madeira na mão e acho um baú vazio, coloco todos lá)
+        
+        for (const chestBlock of emptyChests) {
+            if (bot.inventory.items().length === 0) break
 
-      for (const chestBlock of chests) {
-        if (!enabled || bot.inventory.items().length === 0) break
+            await moveTo(chestBlock.position)
+            const window = await bot.openContainer(chestBlock)
+            
+            try {
+                // Definimos a categoria do baú novo baseada no primeiro item que vamos colocar
+                let assignedCategory = null
+                
+                // Pega itens do bot ordenados (prioridade primeiro)
+                const itemsToDeposit = bot.inventory.items().sort((a, b) => {
+                    const aPrio = PRIORITY_ITEMS.includes(a.name) ? 1 : 0
+                    const bPrio = PRIORITY_ITEMS.includes(b.name) ? 1 : 0
+                    return bPrio - aPrio
+                })
 
-        await moveTo(chestBlock.position)
-        const window = await bot.openContainer(chestBlock)
+                for (const item of itemsToDeposit) {
+                    const itemCat = getItemCategory(item.name)
+                    
+                    // Se o baú ainda não tem categoria, ele ganha a desse item
+                    if (assignedCategory === null) {
+                        assignedCategory = itemCat
+                    }
 
-        try {
-          // Se tiver slot vazio no baú
-          if (window.emptySlotCount() > 0) {
-            // Recalcula itens atuais do bot (pois o loop anterior pode ter depositado algo)
-            const currentItems = bot.inventory.items()
-
-            // Re-ordena (opcional, mas garante consistência)
-            currentItems.sort((a, b) => {
-              const aPrio = PRIORITY_ITEMS.includes(a.name) ? 1 : 0
-              const bPrio = PRIORITY_ITEMS.includes(b.name) ? 1 : 0
-              return bPrio - aPrio
-            })
-
-            for (const item of currentItems) {
-              await window.deposit(item.type, item.metadata, item.count)
-              if (window.emptySlotCount() === 0) break
+                    // Se a categoria do item bater com a do baú (ou for o mesmo item se for 'outros')
+                    if (assignedCategory === 'outros' || itemCat === assignedCategory) {
+                         await window.deposit(item.type, item.metadata, item.count)
+                    }
+                }
+            } finally {
+                window.close()
             }
-          }
-        } finally {
-          window.close()
         }
-      }
     }
 
-    // FASE 3: Fallback (Devolver para Base se estoque estiver lotado)
+    // FASE 3: Sobras -> Devolve
     if (bot.inventory.items().length > 0) {
-      logger?.(
-        "[estoque] ALERTA: Estoque cheio! Devolvendo itens para a base..."
-      )
+      logger?.("[estoque] Sobras devolvidas para a base.")
       await moveTo(returnLoc)
       await dumpInventory(returnLoc)
     }

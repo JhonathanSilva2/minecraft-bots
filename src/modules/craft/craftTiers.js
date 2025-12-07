@@ -55,3 +55,57 @@ export const ORE_ALIASES = {
     
     'pedra': ['stone', 'cobblestone', 'deepslate', 'diorite', 'andesite', 'granite'] 
 }
+
+export const ITEM_GROUPS = {
+  madeira: [
+    '_log', '_planks', '_wood', '_stem', '_hyphae', 'stick', 'sapling', 
+    'door', 'fence', 'gate', 'trapdoor', 'pressure_plate', 'button', 'sign', 'boat'
+  ],
+  pedra: [
+    'cobblestone', 'stone', 'andesite', 'diorite', 'granite', 'tuff', 'deepslate', 
+    'brick', 'polished_', 'calcite', 'dripstone', 'basalt', 'smooth_'
+  ],
+  minerios: [
+    'raw_', '_ingot', 'diamond', 'emerald', 'coal', 'lapis', 'redstone', 'quartz', 
+    'gold_nugget', 'iron_nugget', 'copper_', 'amethyst', 'netherite_'
+  ],
+  ferramentas: [
+    '_pickaxe', '_axe', '_shovel', '_hoe', '_sword', 'bow', 'crossbow', 'trident', 
+    'shield', 'arrow', 'fishing_rod', 'flint_and_steel', 'shears', 'spyglass'
+  ],
+  armaduras: [
+    '_helmet', '_chestplate', '_leggings', '_boots', 'elytra', 'turtle_helmet'
+  ],
+  comida: [
+    'beef', 'porkchop', 'chicken', 'cod', 'salmon', 'mutton', 'rabbit', 'bread', 
+    'apple', 'carrot', 'potato', 'wheat', 'melon', 'pumpkin_pie', 'cookie', 
+    'berries', 'stew', 'soup', 'cake', 'honey'
+  ],
+  drops: [
+    'rotten_flesh', 'bone', 'string', 'spider_eye', 'gunpowder', 'ender_pearl', 
+    'slime_ball', 'magma_cream', 'blaze_', 'ghast_tear', 'phantom_membrane', 
+    'feather', 'leather', 'ink_sac', 'scute', 'egg'
+  ],
+  natureza: [
+    'dirt', 'grass_block', 'sand', 'gravel', 'clay', 'mud', 'snow', 'ice', 
+    'leaves', 'vine', 'lily_pad', 'cactus', 'sugar_cane', 'bamboo', 'kelp', 
+    'flower', 'tulip', 'orchid', 'rose', 'dandelion', 'poppy', 'mushroom', 
+    'moss', 'fern', 'seed'
+  ],
+  redstone: [
+    'redstone', 'repeater', 'comparator', 'piston', 'observer', 'dropper', 
+    'dispenser', 'hopper', 'lever', 'tripwire', 'daylight_detector', 'lamp', 
+    'note_block', 'jukebox', 'tnt', 'rail', 'minecart'
+  ],
+  nether: [
+    'netherrack', 'soul_', 'quartz_block', 'nether_brick', 'glowstone', 
+    'shroomlight', 'crimson_', 'warped_', 'nether_wart'
+  ],
+  end: [
+    'end_stone', 'purpur', 'chorus', 'shulker', 'dragon_'
+  ],
+  construcao: [
+    'glass', 'concrete', 'terracotta', 'wool', 'carpet', 'bed', 'torch', 
+    'lantern', 'ladder', 'scaffolding', 'bucket'
+  ]
+}
