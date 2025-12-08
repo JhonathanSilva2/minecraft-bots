@@ -1,5 +1,6 @@
 import mineflayer from "mineflayer"
 import pf from "mineflayer-pathfinder"
+import toolPlugin from "mineflayer-tool"
 const { pathfinder } = pf
 import mcDataLoader from "minecraft-data"
 
@@ -51,6 +52,7 @@ export function startBot(name = "Max", options = {}) {
   bot.professions = createProfessionManager(bot, logger)
 
   bot.loadPlugin(pathfinder)
+  bot.loadPlugin(toolPlugin.plugin)
 
   bot.once("spawn", () => {
     logger("online e inicializando módulos...")
