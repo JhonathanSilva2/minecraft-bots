@@ -13,7 +13,7 @@ const KNOWN_COMMANDS = new Set([
   "local",
   "armazem",
   "craftar",
-  "minerar"
+  "minerar",
 ])
 
 export function createCommandHandler(stateManager, logger) {
@@ -147,7 +147,7 @@ export function createCommandHandler(stateManager, logger) {
         // Verifica se é uma categoria (ex: "machado")
         // Se for, passa a lista. Se não, passa a string direta.
         const candidates = CRAFT_TIERS[itemInput] || itemInput
-        
+
         crafter.addOrder(candidates, amount)
       } else {
         bot.chat("A profissão de Crafter não está ativa no momento.")
@@ -165,36 +165,42 @@ export function createCommandHandler(stateManager, logger) {
       }
 
       // 1. Comando de Parar
-      if (['parar', 'stop', 'off'].includes(inputOrAction)) {
+      if (["parar", "stop", "off"].includes(inputOrAction)) {
         miner.setEnabled(false)
         return
       }
 
       if (!inputOrAction) {
-        bot.chat(`Uso: !${bot.username} minerar <minerio|parar> [norte|sul|leste|oeste]`)
+        bot.chat(
+          `Uso: !${bot.username} minerar <minerio|parar> [norte|sul|leste|oeste]`
+        )
         return
       }
 
       // 2. Configuração de Direção e Base
       const directionMap = {
-        'norte': 'north', 'north': 'north',
-        'sul': 'south', 'south': 'south',
-        'leste': 'east', 'east': 'east',
-        'oeste': 'west', 'west': 'west'
+        norte: "north",
+        north: "north",
+        sul: "south",
+        south: "south",
+        leste: "east",
+        east: "east",
+        oeste: "west",
+        west: "west",
       }
 
       // Usa a direção informada ou 'norte' como padrão
-      const dir = directionMap[directionInput] || 'north'
+      const dir = directionMap[directionInput] || "north"
 
       // Define a base como a posição atual do bot no momento do comando
       const currentPos = bot.entity.position.clone()
 
       // Define o ponto inicial da mineração 20 blocos à frente
       const offset = {
-        'north': [0, -20],
-        'south': [0, 20],
-        'east': [20, 0],
-        'west': [-20, 0]
+        north: [0, -20],
+        south: [0, 20],
+        east: [20, 0],
+        west: [-20, 0],
       }[dir]
 
       const mineStart = currentPos.offset(offset[0], 0, offset[1])
@@ -204,8 +210,10 @@ export function createCommandHandler(stateManager, logger) {
       const targetOres = ORE_ALIASES[inputOrAction] || [inputOrAction]
 
       // 4. Aplica e Inicia
-      bot.chat(`Configurando mina: Base aqui, Túnel iniciando a 20 blocos para ${dir}. Alvo: ${inputOrAction}`)
-      
+      bot.chat(
+        `Configurando mina: Base aqui, Túnel iniciando a 20 blocos para ${dir}. Alvo: ${inputOrAction}`
+      )
+
       miner.setConfig(currentPos, mineStart, dir)
       miner.setTarget(targetOres) // Isso já chama setEnabled(true) internamente no seu miner.js
       miner.setEnabled(true)
@@ -215,7 +223,13 @@ export function createCommandHandler(stateManager, logger) {
       const professionName = (args[0] || "").toLowerCase()
       const action = (args[1] || "").toLowerCase()
 
-      const permitted_professions = ["lenhador", "estoquista", "crafter, minerador"]
+      const permitted_professions = [
+        "lenhador",
+        "estoquista",
+        "crafter",
+        "minerador",
+        "fazendeiro",
+      ]
 
       if (!permitted_professions.includes(professionName)) return
       if (!bot.professions) return

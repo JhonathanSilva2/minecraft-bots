@@ -13,8 +13,24 @@ export default class MovementManager {
   // ======================================================
   // NAVEGAÇÃO
   // ======================================================
+  async moveTo(bot, pos) {
+    const mov = new pf.Movements(bot)
+    mov.canDig = false // Continua false para ele não sair quebrando tudo no caminho
 
-  async gotoLocation(name) {
+    // CORREÇÃO: Permite parkour (pular blocos) para facilitar o caminho
+    mov.allowParkour = true
+
+    bot.pathfinder.setMovements(mov)
+
+    // Aumenta o tempo que ele pode pensar na rota (padrão é curto)
+    bot.pathfinder.setOptions({
+      searchLimit: 1000, // Limite de nós
+      waitTick: 10000, // Tempo limite
+    })
+
+    await bot.pathfinder.goto(new pf.goals.GoalNear(pos.x, pos.y, pos.z, 1.5))
+  }
+  async gotoLocation(name, enableChat = true) {
     const { bot, logger } = this
     const targetName = (name || "").toLowerCase()
 
@@ -29,11 +45,12 @@ export default class MovementManager {
       bot.pathfinder.setMovements(movements)
 
       const goal = new GoalBlock(location.x, location.y, location.z)
-      logger?.(`[Movement] Indo para ${targetName} (${location.x}, ${location.y}, ${location.z})`)
+      logger?.(
+        `[Movement] Indo para ${targetName} (${location.x}, ${location.y}, ${location.z})`
+      )
 
       await bot.pathfinder.goto(goal)
-      bot.chat(`Cheguei em '${targetName}'.`)
-
+      if (enableChat) bot.chat(`Cheguei em '${targetName}'.`)
     } catch (err) {
       logger?.(`[Movement] Erro ao ir para ${targetName}: ${err.message}`)
       bot.chat(`Não consegui ir para ${targetName}.`)
@@ -83,7 +100,7 @@ export default class MovementManager {
     let lastMove = Date.now()
     let attempts = 0
 
-    bot.removeAllListeners('physicsTick')
+    bot.removeAllListeners("physicsTick")
 
     bot.on("physicsTick", async () => {
       const current = bot.entity.position
@@ -113,7 +130,12 @@ export default class MovementManager {
   }
 
   async microNudge(bot) {
-    const nudges = [new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1)]
+    const nudges = [
+      new Vec3(1, 0, 0),
+      new Vec3(-1, 0, 0),
+      new Vec3(0, 0, 1),
+      new Vec3(0, 0, -1),
+    ]
     const n = nudges[Math.floor(Math.random() * nudges.length)]
     bot.lookAt(bot.entity.position.plus(n))
     bot.setControlState("jump", true)

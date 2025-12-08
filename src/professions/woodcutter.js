@@ -1,10 +1,6 @@
 import pf from "mineflayer-pathfinder"
 import { Vec3 } from "vec3"
 
-const { Movements, goals } = pf
-const { GoalNear } = goals
-
-// Tipos de madeira
 const TREE_TYPES = [
   "oak_log",
   "birch_log",
@@ -17,312 +13,393 @@ const TREE_TYPES = [
 ]
 
 export function createWoodcutter(bot, logger) {
+  // Variáveis de Controle
   let enabled = false
-  let running = false
+  let state = "IDLE"
 
-  bot.on("physicsTick", () => {
-    if (!enabled || running) return
-    running = true
-    runCycle().finally(() => (running = false))
-  })
-
-  function setEnabled(v) {
-    enabled = v
-    if (!v) stopAll()
-    bot.chat(v ? "Lenhador ativado!" : "Lenhador desativado!")
+  // Contexto e Memória
+  let ctx = {
+    targetTreePos: null,
+    treeType: null,
   }
 
-  function isEnabled() {
-    return enabled
+  // FLAG: Impede o loop infinito "Vai pro estoque -> Não acha -> Vai pro estoque"
+  let axeCheckAttempted = false
+
+  // ==========================================================
+  // 1. LOOP DE CONTROLE ASSÍNCRONO
+  // ==========================================================
+
+  async function startControlLoop() {
+    logger?.("[System] Iniciando Loop de Controle Assíncrono...")
+
+    while (enabled) {
+      try {
+        await runState()
+        await bot.waitForTicks(20) // Pausa para respirar
+      } catch (err) {
+        logger?.(`[FSM] Erro Crítico no loop: ${err.message}`)
+        await bot.waitForTicks(40)
+      }
+    }
+
+    logger?.("[System] Loop encerrado.")
   }
 
-  function stopAll() {
-    bot.pathfinder.stop()
-    if (bot.stopDigging) bot.stopDigging()
-  } // --------------------------------------- // CICLO PRINCIPAL // ---------------------------------------
+  // ==========================================================
+  // 2. MÁQUINA DE ESTADOS
+  // ==========================================================
+  async function runState() {
+    switch (state) {
+      case "IDLE":
+        state = "CHECK_STATUS"
+        break
 
-  // Lenhador:runCycle (ATUALIZADO)
-  // ---------------------------------------
-  // CICLO PRINCIPAL
-  // ---------------------------------------
-  // ... (código anterior)
+      case "CHECK_STATUS":
+        await doCheckStatus()
+        break
 
-  // ---------------------------------------
-  // CICLO PRINCIPAL
-  // ---------------------------------------
-  async function runCycle() {
-    if (!enabled) return
+      // --- ROTA DO ESTOQUE ---
+      case "GO_ESTOQUE":
+        await doGoEstoque()
+        break
 
-    try {
-      const base = await bot.locations.get("base")
-      const armazem = await bot.locations.get("estoque")
+      case "SEARCH_AXE":
+        await doSearchAxe()
+        break
 
-      if (!base || !armazem) {
-        logger?.("[lenhador] ERRO: configure base/armazem no locations.json")
-        enabled = false
-        return
-      }
+      case "ASK_FOR_AXE": // <--- COMANDO NOVO AQUI
+        await doAskForAxe()
+        break
 
-      const wood = countLogs(bot)
+      // --- ROTA DA ÁRVORE ---
+      case "FIND_TREE":
+        await doFindTree()
+        break
 
-      // --------------------------
-      // 1) 15+ MADEIRAS → ARMAZENA NA BASE
-      // --------------------------
-      // Note: Se wood >= 64, ele armazena E DEPOIS checa por machado.
-      if (wood >= 64) {
-        logger?.("[lenhador] +1 Pack coletado — armazenando na base...")
-        await storeInArea(bot, logger, base)
+      case "GO_TREE":
+        await doGoTree()
+        break
 
-        // Depois de guardar, checa se ainda tem machado (pode ter guardado um machado velho)
-        await checkForAxe(bot, logger, armazem)
-        return
-      }
+      case "CUT_TREE":
+        await doCutTree()
+        break
 
-      // --------------------------
-      // 2) PRECISA DE MACHADO?
-      // --------------------------
-      let hasAxe = bot.inventory.items().some((i) => i.name.includes("_axe"))
-      let attemptedAxeSearch = false
+      case "REPLANT":
+        await doReplant()
+        break
+      // --- ROTA DA BASE ---
+      case "GO_BASE":
+        await doGoBase()
+        break
 
-      if (!hasAxe) {
-        logger?.("[lenhador] sem machado — procurando no armazém...")
-        attemptedAxeSearch = true
+      case "DEPOSIT_WOOD":
+        await doDepositWood()
+        break
 
-        // *** AQUI O BOT SE MOVE PARA O ARMAZÉM SOMENTE SE NECESSÁRIO ***
-        const got = await checkForAxe(bot, logger, armazem)
-        hasAxe = got // Atualiza o status do machado
+      // --- ESPERA ---
+      case "WAIT":
+        logger?.("[FSM] Aguardando respawn...")
+        await bot.waitForTicks(100)
+        state = "CHECK_STATUS"
+        break
 
-        if (!got) {
-          // Se não encontrou machado, ele avisa, mas não dá 'return'.
-          bot.chat("!jebona craftar axe 1")
-          logger?.(
-            "[lenhador] nenhum machado encontrado — cortando com a mão..."
-          )
-          // O bot segue para o corte (Etapa 3)
-        }
-      }
-
-      // --------------------------
-      // 3) TEM MACHADO OU NÃO → CORTAR ÁRVORE
-      // --------------------------
-      const tree = findNearestTree(bot)
-      if (!tree) {
-        logger?.("[lenhador] nenhuma árvore próxima")
-
-        // Se tentamos buscar machado, não achamos, E não tem árvore para cortar,
-        // então fazemos uma pequena pausa.
-        if (attemptedAxeSearch && !hasAxe) {
-          logger?.("[lenhador] Sem machado e sem árvore. Aguardando...")
-          await bot.waitForTicks(60)
-        }
-        return
-      }
-
-      const basePos = findTrunkBase(bot, tree.position)
-      await moveTo(bot, basePos)
-      await cutTrunk(bot, basePos)
-    } catch (e) {
-      logger?.(`[lenhador] erro: ${e}`)
+      default:
+        logger?.(`[FSM] Estado desconhecido: ${state}. Resetando.`)
+        state = "CHECK_STATUS"
     }
   }
 
-  // ---------------------------------------
-  // ARMAZENAR ITENS (MADEIRA)
-  // ---------------------------------------
-  async function storeInArea(bot, logger, area) {
-    // *** REMOVIDA A CHAMADA PROBLEMÁTICA: await bot.movement.gotoLocation("base") ***
+  // ==========================================================
+  // 3. AÇÕES
+  // ==========================================================
+
+  async function doCheckStatus() {
+    const woodCount = countLogs(bot)
+
+    if (woodCount >= 64) {
+      logger?.(`[FSM] Inventário cheio (${woodCount}). -> Go Base`)
+      state = "GO_BASE"
+      ctx.lastWoodAnnounced = 0
+      return
+    }
+    if (typeof ctx.lastWoodAnnounced === "undefined") ctx.lastWoodAnnounced = 0
+    if (woodCount >= 16 && woodCount !== ctx.lastWoodAnnounced) {
+      logger?.(`[FSM] Madeira coletada: ${woodCount}`)
+      bot.chat(`Madeira coletada: ${woodCount}`)
+      ctx.lastWoodAnnounced = woodCount
+    }
+
+    const hasAxe = bot.inventory.items().some((i) => i.name.includes("_axe"))
+
+    if (hasAxe) {
+      // Se tem machado, reseta a tentativa para o futuro e vai trabalhar
+      axeCheckAttempted = false
+      state = "FIND_TREE"
+      return
+    }
+
+    // Se NÃO tem machado, checamos: "Já tentamos buscar recentemente?"
+    if (!axeCheckAttempted) {
+      logger?.("[FSM] Has Axe? NÃO. -> Go Estoque")
+      state = "GO_ESTOQUE"
+    } else {
+      // Se já tentamos e falhou, ignoramos a falta de machado e seguimos o fluxo
+      logger?.("[FSM] Sem machado (Já verificado). -> Cortar na mão.")
+      state = "FIND_TREE"
+    }
+  }
+
+  async function doGoEstoque() {
+    logger?.("[FSM] Viajando para o estoque...")
+
     try {
-      await bot.pathfinder.goto(
-        new goals.GoalNear(
-          area.x + area.width / 2, // Centro X
-          area.y, // Nível Y
-          area.z + area.depth / 2, // Centro Z
-          4 // Distância de 4 blocos do centro
-        )
+      if (!bot.movement) throw new Error("Sem MovementManager")
+
+      const move = bot.movement.gotoLocation("estoque")
+      const timeout = new Promise((_, r) =>
+        setTimeout(() => r(new Error("TIMEOUT")), 40000)
       )
-    } catch (e) {
-      logger?.(`[lenhador] Erro ao mover para a Base: ${e.message}`)
-      return false
+
+      await Promise.race([move, timeout])
+
+      logger?.("[FSM] Cheguei. -> Search Stock")
+      state = "SEARCH_AXE"
+    } catch (err) {
+      logger?.(`[FSM] Falha ao ir estoque.`)
+      axeCheckAttempted = true
+      state = "ASK_FOR_AXE"
     }
-    const chests = findChestsInArea(area)
-    if (!chests.length) {
-      logger?.("[lenhador] Nenhum baú encontrado!")
-      return false
-    }
-
-    const chest = chests[0]
-
-    // O movimento para o baú é feito aqui, e é aguardado ('await').
-    await moveTo(bot, chest.position)
-
-    const win = await bot.openContainer(chest)
-    const isAxe = (item) => item.name.includes("_axe")
-    try {
-      for (const item of bot.inventory.items()) {
-        if (!isAxe(item)) {
-          await win.deposit(item.type, item.metadata, item.count)
-        }
-      }
-    } finally {
-      win.close()
-    }
-
-    return true
   }
 
-  // ---------------------------------------
-  // PROCURAR MACHADO
-  // ---------------------------------------
-  async function checkForAxe(bot, logger, area) {
-    // Lista de machados por prioridade (do melhor para o pior)
-    // checar se tem machado no inventário
-    let hasAxe = bot.inventory.items().some((i) => i.name.includes("_axe"))
-    if (hasAxe) return true
-    const list = ["diamond_axe", "iron_axe", "stone_axe", "wooden_axe"]
+  async function doSearchAxe() {
+    logger?.("[FSM] Search Stock...")
 
-    for (const axe of list) {
-      const result = await findItemInArea(bot, logger, area, axe)
+    if (!bot.logistics) {
+      state = "ASK_FOR_AXE"
+      return
+    }
 
-      if (result.found) {
-        // 1. Pega o item do baú
-        await takeItemFromChest(bot, result.chest.position, axe)
-        logger?.(`[lenhador] pegando machado ${axe}`)
+    try {
+      const gotAxe = await findAndEquipAxe(bot, logger, "estoque")
 
-        // 2. Localiza o item no inventário (agora que foi pego)
-        const acquiredAxe = bot.inventory.items().find((i) => i.name === axe)
-
-        // 3. Equipa o machado na mão principal
-        if (acquiredAxe) {
-          try {
-            await bot.equip(acquiredAxe, "hand")
-            logger?.(`[lenhador] equipou o machado ${axe}.`)
-          } catch (e) {
-            logger?.(`[lenhador] Erro ao equipar machado: ${e.message}`)
-          }
-        }
-        return true
+      if (gotAxe) {
+        logger?.("[FSM] Find Axe? SIM.")
+        axeCheckAttempted = false // Sucesso!
+        state = "CHECK_STATUS"
+      } else {
+        logger?.("[FSM] Find Axe? NÃO.")
+        state = "ASK_FOR_AXE" // Segue o diagrama
       }
+    } catch (err) {
+      state = "ASK_FOR_AXE"
+    }
+  }
+
+  async function doAskForAxe() {
+    // Marcamos que JÁ TENTAMOS pegar o machado
+    axeCheckAttempted = true
+
+    // COMANDO ATUALIZADO
+    bot.chat("!PedroCrafter craftar machado 1")
+    logger?.("[FSM] Pedido enviado: !jebona craftar machado 1")
+
+    // Segue o fluxo para cortar madeira na mão enquanto espera
+    state = "CHECK_STATUS"
+  }
+
+  async function doGoBase() {
+    try {
+      await bot.movement.gotoLocation("base")
+      state = "DEPOSIT_WOOD"
+    } catch (err) {
+      logger?.("[FSM] Erro ao ir para base.")
+      state = "CHECK_STATUS"
+    }
+  }
+
+  async function doDepositWood() {
+    const manager = bot.movement.storeItemsInZone ? bot.movement : bot.logistics
+    if (manager) {
+      await manager.storeItemsInZone("base", (i) => i.name.endsWith("_log"))
+      logger?.("[FSM] Itens guardados.")
+    }
+
+    // Ao guardar, resetamos a flag para ele ter direito de buscar machado novo depois
+    axeCheckAttempted = false
+    state = "FIND_TREE"
+  }
+
+  async function doFindTree() {
+    const tree = findNearestTree(bot)
+    if (!tree) {
+      state = "WAIT"
+      return
+    }
+
+    ctx.targetTreePos = findTrunkBase(bot, tree.position)
+    ctx.treeType = tree.name
+    state = "GO_TREE"
+  }
+
+  async function doGoTree() {
+    const pos = ctx.targetTreePos
+    if (!pos) {
+      state = "FIND_TREE"
+      return
+    }
+
+    const mov = new pf.Movements(bot)
+    mov.canDig = false
+    mov.allowParkour = true
+    bot.pathfinder.setMovements(mov)
+
+    try {
+      await bot.pathfinder.goto(new pf.goals.GoalNear(pos.x, pos.y, pos.z, 1.5))
+      state = "CUT_TREE"
+    } catch (err) {
+      state = "FIND_TREE"
+    }
+  }
+
+  async function doCutTree() {
+    const pos = ctx.targetTreePos
+    logger?.(`[FSM] Collect Wood...`)
+
+    await cutTrunkLogic(bot, pos)
+    await collectDrops(bot)
+
+    state = "REPLANT"
+  }
+  async function doReplant() {
+    // 1. Tem muda no inventário?
+    const sapling = bot.inventory
+      .items()
+      .find((i) => i.name.includes("sapling"))
+
+    if (!sapling) {
+      // Sem muda, paciência. Segue o jogo.
+      logger?.("[FSM] Sem mudas para replantar.")
+      state = "CHECK_STATUS"
+      return
+    }
+
+    // 2. Onde plantar? (No local onde estava a base do tronco)
+    const pos = ctx.targetTreePos
+    if (!pos) {
+      state = "CHECK_STATUS"
+      return
+    }
+
+    // O bloco "chão" é um bloco abaixo da posição do tronco
+    const dirtBlock = bot.blockAt(pos.offset(0, -1, 0))
+
+    // 3. Validação de segurança
+    if (
+      dirtBlock &&
+      (dirtBlock.name === "dirt" || dirtBlock.name === "grass_block")
+    ) {
+      try {
+        // Equipa a muda
+        await bot.equip(sapling, "hand")
+
+        // Olha para o chão (importante para o servidor aceitar o clique)
+        await bot.lookAt(dirtBlock.position.offset(0.5, 1, 0.5))
+
+        // Coloca o bloco (placeBlock precisa de uma referência de vetor normal, (0,1,0) significa "em cima")
+        await bot.placeBlock(dirtBlock, new Vec3(0, 1, 0))
+
+        logger?.("[FSM] Muda replantada com sucesso!")
+
+        // PAUSA DE SEGURANÇA (Evita kick por spam)
+        await bot.waitForTicks(10)
+      } catch (err) {
+        logger?.(`[FSM] Não consegui plantar: ${err.message}`)
+      }
+    } else {
+      logger?.("[FSM] Local inválido para plantio (não é terra).")
+    }
+
+    // Terminou? Volta para o ciclo normal
+    state = "CHECK_STATUS"
+  }
+
+  // ==========================================================
+  // 4. FUNÇÕES UTILITÁRIAS
+  // ==========================================================
+
+  async function cutTrunkLogic(bot, startPos) {
+    let currentPos = startPos.clone()
+    while (enabled) {
+      const block = bot.blockAt(currentPos)
+      if (!block || !TREE_TYPES.includes(block.name)) break
+      if (bot.entity.position.distanceTo(currentPos) > 5.5) break
+
+      try {
+        await bot.dig(block)
+        await bot.waitForTicks(5)
+      } catch (err) {
+        break
+      }
+
+      currentPos = currentPos.offset(0, 1, 0)
+    }
+  }
+
+  async function collectDrops(bot) {
+    const drops = Object.values(bot.entities).filter(
+      (e) => e.name === "item" && e.position.distanceTo(bot.entity.position) < 6
+    )
+    for (const drop of drops) {
+      if (drop.isValid) {
+        try {
+          await bot.pathfinder.goto(
+            new pf.goals.GoalNear(
+              drop.position.x,
+              drop.position.y,
+              drop.position.z,
+              0
+            )
+          )
+        } catch {}
+      }
+    }
+  }
+
+  async function findAndEquipAxe(bot, logger, zoneName) {
+    const axeNames = [
+      "netherite_axe",
+      "diamond_axe",
+      "iron_axe",
+      "golden_axe",
+      "stone_axe",
+      "wooden_axe",
+    ]
+    const axeIds = axeNames
+      .map((name) => bot.registry.itemsByName[name]?.id)
+      .filter((id) => id !== undefined)
+
+    const success = await bot.logistics.retrieveItemsFromZone(zoneName, [
+      { ids: axeIds, count: 1 },
+    ])
+    if (success) {
+      await bot.logistics.equipBestTool("axe")
+      return true
     }
     return false
   }
-
-  async function findItemInArea(bot, logger, area, itemName) {
-    // CORREÇÃO 1: findChestsInArea é síncrona, SEM 'await'
-    const chests = findChestsInArea(area)
-
-    for (const chest of chests) {
-      await moveTo(bot, chest.position)
-
-      let win
-      try {
-        win = await bot.openContainer(chest)
-      } catch {
-        continue
-      }
-
-      try {
-        const item = win.containerItems().find((i) => i.name === itemName)
-        if (item) {
-          win.close()
-          return { found: true, chest, item }
-        }
-      } finally {
-        win.close()
-      }
-    }
-
-    return { found: false }
-  } // --------------------------------------- // PEGAR ITEM DO BAÚ // ---------------------------------------
-
-  async function takeItemFromChest(bot, pos, itemName) {
-    const chest = bot.blockAt(pos)
-    const win = await bot.openContainer(chest)
-
-    try {
-      const item = win.containerItems().find((i) => i.name === itemName)
-      if (item) {
-        await win.withdraw(item.type, item.metadata, 1)
-      }
-    } finally {
-      win.close()
-    }
-  } // --------------------------------------- // ACHAR BAÚS DENTRO DA ÁREA // ---------------------------------------
-
-  function findChestsInArea(loc) {
-    const minX = loc.x
-    const maxX = loc.x + (loc.width || 1)
-    const minZ = loc.z
-    const maxZ = loc.z + (loc.depth || 1)
-    // CORREÇÃO 2: Ajuste min/maxY para ser mais preciso. Se loc.y for a coordenada
-    // do chão/bloco base, esta faixa permite baús de até 3 blocos de altura acima.
-    const minY = loc.y
-    const maxY = loc.y + 1
-
-    const all = bot.findBlocks({
-      matching: [
-        bot.registry.blocksByName["chest"].id,
-        bot.registry.blocksByName["barrel"]?.id,
-        bot.registry.blocksByName["trapped_chest"]?.id,
-      ].filter(Boolean),
-      maxDistance: 64,
-      count: 200,
-    })
-
-    return all
-      .map((pos) => bot.blockAt(pos))
-      .filter((block) => {
-        const p = block.position
-        return (
-          p.x >= minX &&
-          p.x <= maxX &&
-          p.z >= minZ &&
-          p.z <= maxZ &&
-          p.y >= minY &&
-          p.y <= maxY // Usando o Y ajustado para 2 blocos (y e y+1)
-        )
-      })
-      .sort(
-        (a, b) =>
-          bot.entity.position.distanceTo(a.position) -
-          bot.entity.position.distanceTo(b.position)
-      )
-  } // --------------------------------------- // MOVIMENTO // ---------------------------------------
-
-  async function moveTo(bot, pos) {
-    const mov = new Movements(bot)
-    mov.canDig = false
-    bot.pathfinder.setMovements(mov)
-
-    await bot.pathfinder.goto(new GoalNear(pos.x, pos.y, pos.z, 1))
-  } // --------------------------------------- // ACHAR ÁRVORE MAIS PRÓXIMA // ---------------------------------------
 
   function findNearestTree(bot) {
     const ids = TREE_TYPES.map((n) => bot.registry.blocksByName[n]?.id).filter(
       Boolean
     )
-
-    const found = bot.findBlocks({
-      matching: ids,
-      maxDistance: 100,
-      count: 60,
-    })
-
-    if (!found.length) return null
-
-    return found
-      .map((p) => bot.blockAt(p))
-      .filter(Boolean)
-      .sort(
-        (a, b) =>
-          bot.entity.position.distanceTo(a.position) -
-          bot.entity.position.distanceTo(b.position)
-      )[0]
-  } // --------------------------------------- // ENCONTRAR BASE DO TRONCO // ---------------------------------------
+    const found = bot.findBlocks({ matching: ids, maxDistance: 300, count: 10 })
+    return found.length ? bot.blockAt(found[0]) : null
+  }
 
   function findTrunkBase(bot, pos) {
     let current = bot.blockAt(pos)
     let base = current
-
     while (current) {
       const below = bot.blockAt(current.position.offset(0, -1, 0))
       if (below && TREE_TYPES.includes(below.name)) {
@@ -332,27 +409,38 @@ export function createWoodcutter(bot, logger) {
       }
       break
     }
-
     return base?.position ?? pos
-  } // --------------------------------------- // CORTAR TRONCO // ---------------------------------------
-
-  async function cutTrunk(bot, startPos) {
-    let pos = startPos
-
-    while (enabled) {
-      const block = bot.blockAt(pos)
-      if (!block || !TREE_TYPES.includes(block.name)) break
-
-      await bot.dig(block)
-      pos = pos.offset(0, 1, 0)
-    }
-  } // --------------------------------------- // CONTAR MADEIRAS // ---------------------------------------
+  }
 
   function countLogs(bot) {
     return bot.inventory
       .items()
       .filter((i) => i.name.endsWith("_log"))
       .reduce((a, b) => a + b.count, 0)
+  }
+
+  // ==========================================================
+  // API PÚBLICA
+  // ==========================================================
+
+  function setEnabled(v) {
+    if (enabled === v) return
+
+    enabled = v
+    if (enabled) {
+      bot.chat("Lenhador FSM (Diagrama Final) Ativado.")
+      state = "CHECK_STATUS"
+      axeCheckAttempted = false
+      startControlLoop().catch((err) => console.error("Loop crash:", err))
+    } else {
+      bot.chat("Lenhador Parado.")
+      bot.pathfinder.stop()
+      bot.stopDigging()
+    }
+  }
+
+  function isEnabled() {
+    return enabled
   }
 
   return { setEnabled, isEnabled }
